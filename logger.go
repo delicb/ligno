@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Logger is central datatype in ligno which represents logger itself.
+// Logger is central data type in ligno which represents logger itself.
 // Logger is first level of processing events. It creates them and
 // queues for async processing. It holds slice of Handlers that process
 // messages and context (set of key-value pairs that will be include
@@ -143,4 +143,10 @@ func (l *Logger) Warning(event string, pairs ...string) {
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Error(event string, pairs ...string) {
 	l.Log(ERROR, event, pairs...)
+}
+
+// Critical creates log record and queues it for processing with CRITICAL level.
+// Additional parameters have same semantics as in Log method.
+func (l *Logger) Critical(event string, pairs ...string) {
+	l.Log(CRITICAL, event, pairs...)
 }
