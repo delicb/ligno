@@ -46,7 +46,7 @@ Output would look like:
 2015-12-18 00:37:15.1895  INFO       Some event occurred. [always="present" key="value" key2="value2" ]
 ```
 
-Setup of new still has some boilerplate code, I intend to spend some time on
+Setup of new logger still has some boilerplate code, I intend to spend some time on
 figuring out better API for it.
 
 ## Note
