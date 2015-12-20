@@ -2,15 +2,15 @@ package ligno
 
 import (
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
-	"sync"
 )
 
 type tracker struct {
-	loggers []*Logger
+	loggers       []*Logger
 	loggerCreated chan *Logger
-	mu sync.RWMutex
+	mu            sync.RWMutex
 }
 
 func (lt *tracker) run() {
@@ -37,11 +37,12 @@ func (lt *tracker) wait(done chan struct{}) {
 }
 
 var loggerTracker = tracker{
-	loggers: make([]*Logger, 0, 8),
+	loggers:       make([]*Logger, 0, 8),
 	loggerCreated: make(chan *Logger),
 }
 
 var defaultLog *Logger
+
 func init() {
 	go loggerTracker.run()
 	// done here instead of in default to make sure that tracker is
@@ -53,7 +54,7 @@ func init() {
 func WaitAll() {
 	done := make(chan struct{})
 	loggerTracker.wait(done)
-	<- done
+	<-done
 }
 
 // WaitAllTimeout blocks until all messages send to all loggers are processed or max
@@ -84,8 +85,15 @@ type Logger struct {
 	Context Record
 	// Handlers is slice of handlers for processing messages.
 	Handlers []Handler
-	// messages is channel for queueing and buffering log records.
-	messages  chan Record
+	// Parent is logger that this logger was created from.
+	// It is used to create hierarchy of Context values.
+	Parent *Logger
+	// rawMessages is channel for queueing and buffering raw messages from
+	// application which needs to be merged with context and submitted
+	// to final processing
+	rawRecords chan Record
+	// records is channel for queueing and buffering log records.
+	records chan Record
 	// toProcess is number of messages left to process in this logger.
 	toProcess int32
 }
@@ -93,24 +101,33 @@ type Logger struct {
 // New creates new instance of logger and starts it so it is ready for processing.
 func New(context Record, handlers []Handler) *Logger {
 	l := &Logger{
-		Context:  context,
-		Handlers: handlers,
-		messages: make(chan Record, 2048),
+		Context:    context,
+		Handlers:   handlers,
+		records:    make(chan Record, 2048),
+		rawRecords: make(chan Record, 2048),
 	}
-	go l.run()
+	go l.handle()
+	go l.processRecords()
 	loggerTracker.loggerCreated <- l
 	return l
 }
 
-// run is log record processor which takes records from chan and invokes all handlers.
-func (l *Logger) run() {
+func (l *Logger) SubLogger(context Record, handlers []Handler, propagate bool) *Logger {
+	newLogger := New(context, handlers)
+	newLogger.Parent = l
+	return newLogger
+}
+
+// handle is log record processor which takes records from chan and invokes all handlers.
+func (l *Logger) handle() {
 	var handlers []Handler
 	if len(l.Handlers) == 0 {
 		handlers = []Handler{stdoutHandler}
 	} else {
 		handlers = l.Handlers
 	}
-	for record := range l.messages {
+
+	for record := range l.records {
 		for _, h := range handlers {
 			h.Handle(record)
 		}
@@ -162,7 +179,32 @@ func (l *Logger) log(data Record) {
 		data[TimeKey] = time.Now().UTC()
 	}
 	atomic.AddInt32(&l.toProcess, 1)
-	l.messages <- data
+	l.rawRecords <- data
+}
+
+func (l *Logger) processRecords() {
+	for data := range l.rawRecords {
+		var current = l
+		var loggerChain []*Logger = make([]*Logger, 0, 5)
+
+		// create list of all parents
+		for current != nil {
+			loggerChain = append(loggerChain, current)
+			current = current.Parent
+		}
+		// merge context of all parents backwards, because children can override parents
+		mergedData := make(Record)
+		for i := len(loggerChain) - 1; i >= 0; i-- {
+			for k, v := range loggerChain[i].Context {
+				mergedData[k] = v
+			}
+		}
+		// finally, add provided data
+		for k, v := range data {
+			mergedData[k] = v
+		}
+		l.records <- mergedData
+	}
 }
 
 // Log creates record and queues it for processing.
@@ -228,7 +270,6 @@ func (l *Logger) WarningRecord(record Record) {
 	record[LevelKey] = WARNING
 	l.LogRecord(record)
 }
-
 
 // Error creates log record and queues it for processing with ERROR level.
 // Additional parameters have same semantics as in Log method.
