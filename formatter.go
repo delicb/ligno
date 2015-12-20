@@ -17,15 +17,18 @@ type Formatter interface {
 // DefaultFormatter converts log record to simple string for printing.
 type DefaultFormatter struct{}
 
+// defaultTimeFormat is formatting string for time for DefaultFormatter
+const defaultTimeFormat = "2006-01-02 15:05:06.0000"
+
 // Format converts provided log record to format suitable for printing in one line.
 // String produced resembles traditional log message.
 func (df *DefaultFormatter) Format(record Record) string {
-	time := record.Time().Format("2006-01-02 15:05:06.0000")
-	delete(record, TIME)
+	time := record.Time().Format(defaultTimeFormat)
+	delete(record, TimeKey)
 	level := record.Level()
-	delete(record, LEVEL)
+	delete(record, LevelKey)
 	event := record.Event()
-	delete(record, EVENT)
+	delete(record, EventKey)
 	var buff bytes.Buffer
 
 	for k, v := range record {

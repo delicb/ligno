@@ -4,7 +4,73 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
+	"sync"
 )
+
+type tracker struct {
+	loggers []*Logger
+	loggerCreated chan *Logger
+	mu sync.RWMutex
+}
+
+func (lt *tracker) run() {
+	for l := range lt.loggerCreated {
+		lt.mu.Lock()
+		lt.loggers = append(lt.loggers, l)
+		lt.mu.Unlock()
+	}
+}
+
+func (lt *tracker) wait(done chan struct{}) {
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
+	var wg sync.WaitGroup
+	for _, l := range lt.loggers {
+		wg.Add(1)
+		go func(l *Logger) {
+			l.Wait()
+			wg.Done()
+		}(l)
+	}
+	wg.Wait()
+	close(done)
+}
+
+var loggerTracker = tracker{
+	loggers: make([]*Logger, 0, 8),
+	loggerCreated: make(chan *Logger),
+}
+
+var defaultLog *Logger
+func init() {
+	go loggerTracker.run()
+	// done here instead of in default to make sure that tracker is
+	// running before creating any loggers
+	defaultLog = New(nil, []Handler{stdoutHandler})
+}
+
+// WaitAll blocks until all loggers are finished with message processing.
+func WaitAll() {
+	done := make(chan struct{})
+	loggerTracker.wait(done)
+	<- done
+}
+
+// WaitAllTimeout blocks until all messages send to all loggers are processed or max
+// specified amount of time.
+// Boolean return value indicates if function returned because all messages
+// were processed (true) or because timeout has expired (false).
+func WaitAllTimeout(t time.Duration) bool {
+	done := make(chan struct{})
+	timeout := time.After(t)
+	go loggerTracker.wait(done)
+	select {
+	case <-done:
+		return true
+	case <-timeout:
+		return false
+	}
+}
 
 // Logger is central data type in ligno which represents logger itself.
 // Logger is first level of processing events. It creates them and
@@ -32,6 +98,7 @@ func New(context Record, handlers []Handler) *Logger {
 		messages: make(chan Record, 2048),
 	}
 	go l.run()
+	loggerTracker.loggerCreated <- l
 	return l
 }
 
@@ -91,8 +158,8 @@ func (l *Logger) log(data Record) {
 	for k, v := range l.Context {
 		data[k] = v
 	}
-	if _, ok := data[TIME]; !ok {
-		data[TIME] = time.Now().UTC()
+	if _, ok := data[TimeKey]; !ok {
+		data[TimeKey] = time.Now().UTC()
 	}
 	atomic.AddInt32(&l.toProcess, 1)
 	l.messages <- data
@@ -109,8 +176,8 @@ func (l *Logger) log(data Record) {
 //  {LEVEL: INFO", EVENT: "User logged in", "user_id": user_id, "platform": PLATFORM_NAME}
 func (l *Logger) Log(level Level, event string, pairs ...string) {
 	var d = make(Record)
-	d[EVENT] = event
-	d[LEVEL] = level
+	d[EventKey] = event
+	d[LevelKey] = level
 	// make sure that number of items in data is even
 	if len(pairs)%2 != 0 {
 		pairs = append(pairs, "")
@@ -121,10 +188,21 @@ func (l *Logger) Log(level Level, event string, pairs ...string) {
 	l.log(d)
 }
 
+// LogRecord adds provided record to queue for processing.
+func (l *Logger) LogRecord(record Record) {
+	l.log(record)
+}
+
 // Debug creates log record and queues it for processing with DEBUG level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Debug(event string, pairs ...string) {
 	l.Log(DEBUG, event, pairs...)
+}
+
+// DebugRecord adds DEBUG level to provided record and queues it for processing.
+func (l *Logger) DebugRecord(record Record) {
+	record[LevelKey] = DEBUG
+	l.LogRecord(record)
 }
 
 // Info creates log record and queues it for processing with INFO level.
@@ -133,11 +211,24 @@ func (l *Logger) Info(event string, pairs ...string) {
 	l.Log(INFO, event, pairs...)
 }
 
+// InfoRecord adds INFO level to provided record and queues it for processing.
+func (l *Logger) InfoRecord(record Record) {
+	record[LevelKey] = INFO
+	l.LogRecord(record)
+}
+
 // Warning creates log record and queues it for processing with WARNING level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Warning(event string, pairs ...string) {
 	l.Log(WARNING, event, pairs...)
 }
+
+// WarningRecord adds WARNING level to provided record and queues it for processing.
+func (l *Logger) WarningRecord(record Record) {
+	record[LevelKey] = WARNING
+	l.LogRecord(record)
+}
+
 
 // Error creates log record and queues it for processing with ERROR level.
 // Additional parameters have same semantics as in Log method.
@@ -145,8 +236,20 @@ func (l *Logger) Error(event string, pairs ...string) {
 	l.Log(ERROR, event, pairs...)
 }
 
+// ErrorRecord adds ERROR level to provided record and queues it for processing.
+func (l *Logger) ErrorRecord(record Record) {
+	record[LevelKey] = ERROR
+	l.LogRecord(record)
+}
+
 // Critical creates log record and queues it for processing with CRITICAL level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Critical(event string, pairs ...string) {
 	l.Log(CRITICAL, event, pairs...)
+}
+
+// CriticalRecord adds CRITICAL level to provided record and queues it for processing.
+func (l *Logger) CriticalRecord(record Record) {
+	record[LevelKey] = INFO
+	l.LogRecord(record)
 }
