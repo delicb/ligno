@@ -140,7 +140,7 @@ func (l *Logger) handle() {
 	var notifyFinished chan struct{}
 	for {
 		select {
-		case record := <- l.records:
+		case record := <-l.records:
 			for _, h := range handlers {
 				h.Handle(record)
 			}
@@ -160,6 +160,45 @@ func (l *Logger) handle() {
 			}
 		}
 	}
+}
+
+// processRecords creates full records from provided user record and this and
+// all parents contexts.
+func (l *Logger) processRecords() {
+	for data := range l.rawRecords {
+		var current = l
+		var loggerChain = make([]*Logger, 0, 5)
+
+		// create list of all parents
+		for current != nil {
+			loggerChain = append(loggerChain, current)
+			current = current.Parent
+		}
+		// merge context of all parents backwards, because children can override parents
+		mergedData := make(Record)
+		for i := len(loggerChain) - 1; i >= 0; i-- {
+			for k, v := range loggerChain[i].Context {
+				mergedData[k] = v
+			}
+		}
+		// finally, add provided data to override all context keys
+		for k, v := range data {
+			mergedData[k] = v
+		}
+		l.records <- mergedData
+		if l.propagate && l.Parent != nil {
+			l.Parent.log(data)
+		}
+	}
+}
+
+// log creates record suitable for processing and sends it to messages chan.
+func (l *Logger) log(data Record) {
+	if _, ok := data[TimeKey]; !ok {
+		data[TimeKey] = time.Now().UTC()
+	}
+	atomic.AddInt32(&l.toProcess, 1)
+	l.rawRecords <- data
 }
 
 // wait blocks until all messages on messages channel are processed.
@@ -191,46 +230,6 @@ func (l *Logger) WaitTimeout(t time.Duration) (ok bool) {
 		return true
 	case <-timeout:
 		return false
-	}
-}
-
-// log creates record suitable for processing and sends it to messages chan.
-func (l *Logger) log(data Record) {
-	for k, v := range l.Context {
-		data[k] = v
-	}
-	if _, ok := data[TimeKey]; !ok {
-		data[TimeKey] = time.Now().UTC()
-	}
-	atomic.AddInt32(&l.toProcess, 1)
-	l.rawRecords <- data
-}
-
-func (l *Logger) processRecords() {
-	for data := range l.rawRecords {
-		var current = l
-		var loggerChain = make([]*Logger, 0, 5)
-
-		// create list of all parents
-		for current != nil {
-			loggerChain = append(loggerChain, current)
-			current = current.Parent
-		}
-		// merge context of all parents backwards, because children can override parents
-		mergedData := make(Record)
-		for i := len(loggerChain) - 1; i >= 0; i-- {
-			for k, v := range loggerChain[i].Context {
-				mergedData[k] = v
-			}
-		}
-		// finally, add provided data
-		for k, v := range data {
-			mergedData[k] = v
-		}
-		l.records <- mergedData
-		if l.propagate && l.Parent != nil {
-			l.Parent.log(data)
-		}
 	}
 }
 
