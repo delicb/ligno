@@ -3,6 +3,7 @@ package ligno
 import (
 	"fmt"
 	"os"
+	"io"
 )
 
 // Handler processes log records and writes them to appropriate destination.
@@ -46,7 +47,7 @@ func shouldLog(record Record, filters []Filter) bool {
 	return res
 }
 
-var _out = os.Stdout
+var _out io.Writer = os.Stdout
 
 // StdoutHandler is handler that prints log records to standard output.
 type StdoutHandler struct {
@@ -67,7 +68,6 @@ func (sh *StdoutHandler) Handle(record Record) {
 	} else {
 		formatter = sh.Formatter
 	}
-
 	fmt.Fprintln(_out, formatter.Format(record))
 }
 
