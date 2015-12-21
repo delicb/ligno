@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -31,12 +32,22 @@ func (df *DefaultFormatter) Format(record Record) string {
 	delete(record, EventKey)
 	var buff bytes.Buffer
 
-	for k, v := range record {
+	keys := make([]string, 0, len(record))
+	for k, _ := range record {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for i := 0; i < len(keys); i++ {
+		k := keys[i]
+		v := strconv.Quote(fmt.Sprintf("%+v", record[k]))
 		if strings.IndexFunc(k, needsQuote) >= 0 || k == "" {
 			k = strconv.Quote(k)
 		}
-		vv := fmt.Sprintf("%+v", v)
-		buff.WriteString(fmt.Sprintf("%s=%+v ", k, strconv.Quote(vv)))
+		buff.WriteString(fmt.Sprintf("%s=%+v", k, v))
+		if i < len(keys)-1 {
+			buff.WriteString(" ")
+		}
 	}
 	return fmt.Sprintf("%-25s %-10s %-15s [%s]", time, level, event, buff.String())
 }
