@@ -94,6 +94,13 @@ type Logger struct {
 	rawRecords chan Record
 	// records is channel for queueing and buffering log records.
 	records chan Record
+	// propagate is flag that determines if records will be propagated to
+	// parent logger for processing too.
+	propagate bool
+	// notifyFinished is channel of channels. When someone wants to be notified
+	// when logger processed all queued records, it sends channel that will be
+	// closed after last queued record is processed to notifyFinished.
+	notifyFinished chan chan struct{}
 	// toProcess is number of messages left to process in this logger.
 	toProcess int32
 }
@@ -101,10 +108,11 @@ type Logger struct {
 // New creates new instance of logger and starts it so it is ready for processing.
 func New(context Record, handlers []Handler) *Logger {
 	l := &Logger{
-		Context:    context,
-		Handlers:   handlers,
-		records:    make(chan Record, 2048),
-		rawRecords: make(chan Record, 2048),
+		Context:        context,
+		Handlers:       handlers,
+		records:        make(chan Record, 2048),
+		rawRecords:     make(chan Record, 2048),
+		notifyFinished: make(chan chan struct{}),
 	}
 	go l.handle()
 	go l.processRecords()
@@ -112,9 +120,11 @@ func New(context Record, handlers []Handler) *Logger {
 	return l
 }
 
+// SubLogger creates and returns new logger whose parent is current logger.
 func (l *Logger) SubLogger(context Record, handlers []Handler, propagate bool) *Logger {
 	newLogger := New(context, handlers)
 	newLogger.Parent = l
+	newLogger.propagate = propagate
 	return newLogger
 }
 
@@ -127,11 +137,28 @@ func (l *Logger) handle() {
 		handlers = l.Handlers
 	}
 
-	for record := range l.records {
-		for _, h := range handlers {
-			h.Handle(record)
+	var notifyFinished chan struct{}
+	for {
+		select {
+		case record := <- l.records:
+			for _, h := range handlers {
+				h.Handle(record)
+			}
+			atomic.AddInt32(&l.toProcess, -1)
+			// if count dropped to 0, close notification channel
+			if atomic.LoadInt32(&l.toProcess) == 0 && notifyFinished != nil {
+				close(notifyFinished)
+				// reset notification channel
+				notifyFinished = nil
+			}
+		case notifyFinished = <-l.notifyFinished:
+			// check count right away and notify that processing is done if possible
+			if atomic.LoadInt32(&l.toProcess) == 0 {
+				close(notifyFinished)
+				// reset notification channel
+				notifyFinished = nil
+			}
 		}
-		atomic.AddInt32(&l.toProcess, -1)
 	}
 }
 
@@ -140,17 +167,14 @@ func (l *Logger) handle() {
 // interested parties that they can unblock.
 func (l *Logger) wait(done chan struct{}) {
 	runtime.Gosched()
-	for atomic.LoadInt32(&l.toProcess) > 0 {
-		time.Sleep(1 * time.Millisecond)
-	}
-	close(done)
+	l.notifyFinished <- done
 }
 
 // Wait block until all messages sent to logger are processed.
 // If timeout is needed, see WaitTimeout.
 func (l *Logger) Wait() {
 	done := make(chan struct{})
-	go l.wait(done)
+	l.wait(done)
 	<-done
 }
 
@@ -161,7 +185,7 @@ func (l *Logger) Wait() {
 func (l *Logger) WaitTimeout(t time.Duration) (ok bool) {
 	done := make(chan struct{})
 	timeout := time.After(t)
-	go l.wait(done)
+	l.wait(done)
 	select {
 	case <-done:
 		return true
@@ -185,7 +209,7 @@ func (l *Logger) log(data Record) {
 func (l *Logger) processRecords() {
 	for data := range l.rawRecords {
 		var current = l
-		var loggerChain []*Logger = make([]*Logger, 0, 5)
+		var loggerChain = make([]*Logger, 0, 5)
 
 		// create list of all parents
 		for current != nil {
@@ -204,6 +228,9 @@ func (l *Logger) processRecords() {
 			mergedData[k] = v
 		}
 		l.records <- mergedData
+		if l.propagate && l.Parent != nil {
+			l.Parent.log(data)
+		}
 	}
 }
 
