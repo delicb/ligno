@@ -73,6 +73,12 @@ func WaitAllTimeout(t time.Duration) bool {
 	}
 }
 
+type loggerState uint8
+const (
+	loggerRunning loggerState = iota
+	loggerStopped
+)
+
 // Logger is central data type in ligno which represents logger itself.
 // Logger is first level of processing events. It creates them and
 // queues for async processing. It holds slice of Handlers that process
@@ -96,13 +102,16 @@ type Logger struct {
 	records chan Record
 	// propagate is flag that determines if records will be propagated to
 	// parent logger for processing too.
-	propagate bool
+	propagate      bool
 	// notifyFinished is channel of channels. When someone wants to be notified
 	// when logger processed all queued records, it sends channel that will be
 	// closed after last queued record is processed to notifyFinished.
 	notifyFinished chan chan struct{}
 	// toProcess is number of messages left to process in this logger.
-	toProcess int32
+	toProcess      int32
+	// state represents state in which logger is currently
+	state          loggerState
+	stateMu        sync.RWMutex
 }
 
 // New creates new instance of logger and starts it so it is ready for processing.
@@ -116,6 +125,9 @@ func New(context Record, handlers []Handler) *Logger {
 	}
 	go l.handle()
 	go l.processRecords()
+	l.stateMu.Lock()
+	l.state = loggerRunning
+	l.stateMu.Unlock()
 	loggerTracker.loggerCreated <- l
 	return l
 }
@@ -165,40 +177,89 @@ func (l *Logger) handle() {
 // processRecords creates full records from provided user record and this and
 // all parents contexts.
 func (l *Logger) processRecords() {
-	for data := range l.rawRecords {
-		var current = l
-		var loggerChain = make([]*Logger, 0, 5)
+	for {
+		select {
+		case data, ok := <-l.rawRecords:
+			if !ok {
+				return
+			}
+			//	for data := range l.rawRecords {
+			var current = l
+			var loggerChain = make([]*Logger, 0, 5)
 
-		// create list of all parents
-		for current != nil {
-			loggerChain = append(loggerChain, current)
-			current = current.Parent
-		}
-		// merge context of all parents backwards, because children can override parents
-		mergedData := make(Record)
-		for i := len(loggerChain) - 1; i >= 0; i-- {
-			for k, v := range loggerChain[i].Context {
+			// create list of all parents
+			for current != nil {
+				loggerChain = append(loggerChain, current)
+				current = current.Parent
+			}
+			// merge context of all parents backwards, because children can override parents
+			mergedData := make(Record)
+			for i := len(loggerChain) - 1; i >= 0; i-- {
+				for k, v := range loggerChain[i].Context {
+					mergedData[k] = v
+				}
+			}
+			// finally, add provided data to override all context keys
+			for k, v := range data {
 				mergedData[k] = v
 			}
-		}
-		// finally, add provided data to override all context keys
-		for k, v := range data {
-			mergedData[k] = v
-		}
-		l.records <- mergedData
-		if l.propagate && l.Parent != nil {
-			l.Parent.log(data)
+			l.records <- mergedData
+			if l.propagate && l.Parent != nil {
+				l.Parent.log(data)
+			}
 		}
 	}
 }
 
 // log creates record suitable for processing and sends it to messages chan.
 func (l *Logger) log(data Record) {
+	l.stateMu.RLock()
+	defer l.stateMu.RUnlock()
+	if l.state == loggerStopped {
+		return
+	}
 	if _, ok := data[TimeKey]; !ok {
 		data[TimeKey] = time.Now().UTC()
 	}
 	atomic.AddInt32(&l.toProcess, 1)
 	l.rawRecords <- data
+}
+
+// Stop stops listening for new messages sent to this logger.
+// Messages already sent will be processed, but all new messages will
+// silently be dropped.
+// Stopping loggers stops processing goroutines and cleans up resources.
+func (l *Logger) Stop() {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	l.state = loggerStopped
+	close(l.rawRecords)
+}
+
+// StopAndWait stops listening for new messages sent to this logger and
+// blocks until all previously arrived messages are processed.
+// Records already sent will be processed, but all new messages will
+// silently be dropped.
+func (l *Logger) StopAndWait() {
+	l.Stop()
+	l.Wait()
+}
+
+// StopAndWaitTimeout stops listening for new messages sent to this logger and
+// blocks until all previously sent message are processed or max provided duration.
+// Records already sent will be processed, but all new messages will
+// silently be dropped. Return value indicates if all messages are processed (true)
+// or if provided timeout expired (false)
+func (l *Logger) StopAndWaitTimeout(t time.Duration) (finished bool) {
+	l.Stop()
+	return l.WaitTimeout(t)
+}
+
+// IsRunning returns boolean indicating if this logger is still running.
+func (l *Logger) IsRunning() bool {
+	l.stateMu.RLock()
+	defer l.stateMu.RUnlock()
+	return l.state == loggerRunning
 }
 
 // wait blocks until all messages on messages channel are processed.
@@ -221,7 +282,7 @@ func (l *Logger) Wait() {
 // specified amount of time.
 // Boolean return value indicates if function returned because all messages
 // were processed (true) or because timeout has expired (false).
-func (l *Logger) WaitTimeout(t time.Duration) (ok bool) {
+func (l *Logger) WaitTimeout(t time.Duration) (finished bool) {
 	done := make(chan struct{})
 	timeout := time.After(t)
 	l.wait(done)
