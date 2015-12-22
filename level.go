@@ -87,7 +87,6 @@ func (l Level) String() string {
 
 // MarshalJSON returns levels JSON representation (implementation of json.Marshaler)
 func (l Level) MarshalJSON() ([]byte, error) {
-	fmt.Println("In MarshalJSON")
 	return []byte(fmt.Sprintf("%q", l.String())), nil
 }
 
@@ -96,8 +95,8 @@ func (l *Level) UnmarshalJSON(b []byte) error {
 	levelStr, _ := strconv.Unquote(string(b))
 
 	level, ok := name2Level[levelStr]
-	if ok {
-		fmt.Printf("Found %s in map, value: %d\n", levelStr, level)
+	if !ok {
+		return fmt.Errorf("unknown level: %s", levelStr)
 	}
 	*l = level
 	return nil
