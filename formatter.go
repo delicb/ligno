@@ -33,7 +33,7 @@ func (df *DefaultFormatter) Format(record Record) string {
 	var buff bytes.Buffer
 
 	keys := make([]string, 0, len(record))
-	for k, _ := range record {
+	for k := range record {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
