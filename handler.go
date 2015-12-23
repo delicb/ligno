@@ -12,6 +12,26 @@ type Handler interface {
 	Handle(Record)
 }
 
+// CombiningHandler combines multiple other handlers
+type combiningHandler struct {
+	Handlers []Handler
+}
+
+// Handle processes record by passing it to all internal handler of this handler.
+func (ch *combiningHandler) Handle(record Record) {
+	for _, h := range ch.Handlers {
+		h.Handle(record)
+	}
+}
+
+// Combining handler creates and returns handler that passes records to all
+// provided handlers.
+func CombiningHandler(handlers ...Handler) *combiningHandler {
+	return &combiningHandler{
+		Handlers: handlers,
+	}
+}
+
 // Filter determines if log record should be processed further.
 type Filter interface {
 	// ShouldLog returns bool flag that indicates whether message should be

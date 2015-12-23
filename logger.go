@@ -1,60 +1,18 @@
 package ligno
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type tracker struct {
-	loggers       []*Logger
-	loggerCreated chan *Logger
-	mu            sync.RWMutex
-}
-
-func (lt *tracker) run() {
-	for l := range lt.loggerCreated {
-		lt.mu.Lock()
-		lt.loggers = append(lt.loggers, l)
-		lt.mu.Unlock()
-	}
-}
-
-func (lt *tracker) wait(done chan struct{}) {
-	lt.mu.RLock()
-	defer lt.mu.RUnlock()
-	var wg sync.WaitGroup
-	for _, l := range lt.loggers {
-		wg.Add(1)
-		go func(l *Logger) {
-			l.Wait()
-			wg.Done()
-		}(l)
-	}
-	wg.Wait()
-	close(done)
-}
-
-var loggerTracker = tracker{
-	loggers:       make([]*Logger, 0, 8),
-	loggerCreated: make(chan *Logger),
-}
-
-var rootLogger *Logger
-
-func init() {
-	go loggerTracker.run()
-	// done here instead of in default to make sure that tracker is
-	// running before creating any loggers
-	rootLogger = New(nil, []Handler{stdoutHandler})
-}
+var rootLogger *Logger = createLogger(nil, nil, NOTSET, 2048, 2048)
 
 // WaitAll blocks until all loggers are finished with message processing.
 func WaitAll() {
-	done := make(chan struct{})
-	loggerTracker.wait(done)
-	<-done
+	rootLogger.Wait()
 }
 
 // WaitAllTimeout blocks until all messages send to all loggers are processed or max
@@ -62,15 +20,7 @@ func WaitAll() {
 // Boolean return value indicates if function returned because all messages
 // were processed (true) or because timeout has expired (false).
 func WaitAllTimeout(t time.Duration) bool {
-	done := make(chan struct{})
-	timeout := time.After(t)
-	go loggerTracker.wait(done)
-	select {
-	case <-done:
-		return true
-	case <-timeout:
-		return false
-	}
+	return rootLogger.WaitTimeout(t)
 }
 
 type loggerState uint8
@@ -89,21 +39,34 @@ type Logger struct {
 	// Context in which logger is operating. Basically, this is set of
 	// key-value pairs that will be added to every record logged with this
 	// logger. They have lowest priority.
-	Context Ctx
-	// Handlers is slice of handlers for processing messages.
-	Handlers []Handler
-	// Parent is logger that this logger was created from.
-	// It is used to create hierarchy of Context values.
-	Parent *Logger
+	context Ctx
+	// handler is backed for processing records.
+	handler struct {
+		sync.RWMutex
+		val Handler
+	}
+
+	// relationship holds information about logger parent and children.
+	relationship struct {
+		sync.RWMutex
+		// parent is this logger's parent. Final context of record is created
+		// by combining all parents contexts and if preventPropagation is false
+		// all records will be sent to parent to processing as well.
+		// parent should be immutable once it is set, so it should be safe to
+		// read it without concurrency protection.
+		parent *Logger
+		// children is slice of all loggers that have this logger as parent.
+		children []*Logger
+		// preventPropagation is flag that indicates if propagation of log
+		// records to parent should be prevented.
+		preventPropagation bool
+	}
 	// rawMessages is channel for queueing and buffering raw messages from
 	// application which needs to be merged with context and submitted
 	// to final processing
 	rawRecords chan Record
 	// records is channel for queueing and buffering log records.
 	records chan Record
-	// propagate is flag that determines if records will be propagated to
-	// parent logger for processing too.
-	propagate bool
 	// notifyFinished is channel of channels. When someone wants to be notified
 	// when logger processed all queued records, it sends channel that will be
 	// closed after last queued record is processed to notifyFinished.
@@ -123,50 +86,84 @@ type Logger struct {
 }
 
 // New creates new instance of logger and starts it so it is ready for processing.
-func New(context Ctx, handlers []Handler) *Logger {
+func New(context Ctx, handler Handler) *Logger {
+	return rootLogger.SubLogger(context, handler, false)
+}
+
+func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint, rawRecordsBuffer uint) *Logger {
 	l := &Logger{
-		Context:        context,
-		Handlers:       handlers,
-		records:        make(chan Record, 2048),
-		rawRecords:     make(chan Record, 2048),
+		context:        context,
+		records:        make(chan Record, recordsBuffer),
+		rawRecords:     make(chan Record, rawRecordsBuffer),
 		notifyFinished: make(chan chan struct{}),
 	}
+	// no need to lock access to handler, state or level here
+	// since we just created logger and nobody can use it anywhere else.
+	l.handler.val = handler
+	l.state.val = loggerRunning
+	l.level.val = level
+	// start logger pipeline
 	go l.handle()
 	go l.processRecords()
-	l.state.Lock()
-	l.state.val = loggerRunning
-	l.state.Unlock()
-	l.level.Lock()
-	l.level.val = DEBUG
-	l.level.Unlock()
-	loggerTracker.loggerCreated <- l
 	return l
 }
 
 // SubLogger creates and returns new logger whose parent is current logger.
-func (l *Logger) SubLogger(context Ctx, handlers []Handler, propagate bool) *Logger {
-	newLogger := New(context, handlers)
-	newLogger.Parent = l
-	newLogger.propagate = propagate
+func (l *Logger) SubLogger(context Ctx, handler Handler, preventPropagation bool) *Logger {
+	newLogger := createLogger(context, handler, DEBUG, 2048, 2048)
+	l.addChild(newLogger, preventPropagation)
 	return newLogger
+}
+
+func (l *Logger) addChild(child *Logger, preventPropagation bool) {
+	l.relationship.Lock()
+	l.relationship.children = append(l.relationship.children, child)
+	l.relationship.Unlock()
+
+	child.relationship.Lock()
+	child.relationship.parent = l
+	child.relationship.preventPropagation = preventPropagation
+	child.relationship.Unlock()
+}
+
+func (l *Logger) removeChild(child *Logger) {
+	if l == nil {
+		fmt.Println("Got nil receiver")
+	}
+	l.relationship.Lock()
+	defer l.relationship.Unlock()
+	var removeIndex int = -1
+	for i, ch := range l.relationship.children {
+		if child == ch {
+			removeIndex = i
+			break
+		}
+	}
+	// remove it only if we found it
+	if removeIndex > -1 {
+		copy(l.relationship.children[removeIndex:], l.relationship.children[removeIndex+1:])
+		// if we do not do this there is potential memory leak, since we are holding pointers
+		l.relationship.children[len(l.relationship.children)-1] = nil
+		l.relationship.children = l.relationship.children[:len(l.relationship.children)-1]
+	}
 }
 
 // handle is log record processor which takes records from chan and invokes all handlers.
 func (l *Logger) handle() {
-	var handlers []Handler
-	if len(l.Handlers) == 0 {
-		handlers = []Handler{stdoutHandler}
+	var handler Handler
+	l.handler.RLock()
+	if l.handler.val != nil {
+		handler = l.handler.val
 	} else {
-		handlers = l.Handlers
+		handler = stdoutHandler
 	}
+	l.handler.RUnlock()
 
 	var notifyFinished chan struct{}
 	for {
 		select {
 		case record := <-l.records:
-			for _, h := range handlers {
-				h.Handle(record)
-			}
+			handler.Handle(record)
 			atomic.AddInt32(&l.toProcess, -1)
 			// if count dropped to 0, close notification channel
 			if atomic.LoadInt32(&l.toProcess) == 0 && notifyFinished != nil {
@@ -201,12 +198,12 @@ func (l *Logger) processRecords() {
 			// create list of all parents
 			for current != nil {
 				loggerChain = append(loggerChain, current)
-				current = current.Parent
+				current = current.relationship.parent
 			}
 			// merge context of all parents backwards, because children can override parents
 			mergedData := make(Ctx)
 			for i := len(loggerChain) - 1; i >= 0; i-- {
-				for k, v := range loggerChain[i].Context {
+				for k, v := range loggerChain[i].context {
 					mergedData[k] = v
 				}
 			}
@@ -216,8 +213,8 @@ func (l *Logger) processRecords() {
 			}
 			record.Context = mergedData
 			l.records <- record
-			if l.propagate && l.Parent != nil {
-				l.Parent.log(record)
+			if !l.relationship.preventPropagation && l.relationship.parent != nil {
+				l.relationship.parent.log(record)
 			}
 		}
 	}
@@ -244,6 +241,9 @@ func (l *Logger) Stop() {
 	defer l.state.Unlock()
 	l.state.val = loggerStopped
 	close(l.rawRecords)
+	if l.relationship.parent != nil {
+		l.relationship.parent.removeChild(l)
+	}
 }
 
 // StopAndWait stops listening for new messages sent to this logger and
@@ -277,7 +277,23 @@ func (l *Logger) IsRunning() bool {
 // interested parties that they can unblock.
 func (l *Logger) wait(done chan struct{}) {
 	runtime.Gosched()
-	l.notifyFinished <- done
+	l.relationship.RLock()
+	defer l.relationship.RUnlock()
+	var wg sync.WaitGroup
+	wg.Add(len(l.relationship.children) + 1)
+	go func() {
+		l.notifyFinished <- done
+		wg.Done()
+	}()
+	for _, child := range l.relationship.children {
+		go func(l *Logger) {
+			chDone := make(chan struct{})
+			l.wait(chDone)
+			<-chDone
+			wg.Done()
+		}(child)
+	}
+	wg.Wait()
 }
 
 // Wait block until all messages sent to logger are processed.
@@ -340,6 +356,7 @@ func (l *Logger) LogCtx(level Level, message string, data Ctx) {
 	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
+		Message: message,
 		Context: data,
 	}
 	l.log(r)
