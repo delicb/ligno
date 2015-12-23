@@ -10,65 +10,65 @@ package ligno
 // will be translated into log record with following keys:
 //  {LEVEL: INFO", EVENT: "User logged in", "user_id": user_id, "platform": PLATFORM_NAME}
 func Log(level Level, event string, pairs ...string) {
-	defaultLog.Log(level, event, pairs...)
+	rootLogger.Log(level, event, pairs...)
 }
 
-// LogRecord adds provided record to queue for processing.
-func LogRecord(record Record) {
-	defaultLog.LogRecord(record)
+// LogCtx adds provided message in specified level.
+func LogCtx(level Level, message string, ctx Ctx) {
+	rootLogger.LogCtx(level, message, ctx)
 }
 
 // Debug creates log record and queues it for processing with DEBUG level.
 // Additional parameters have same semantics as in Log method.
 func Debug(event string, pairs ...string) {
-	defaultLog.Debug(event, pairs...)
+	rootLogger.Debug(event, pairs...)
 }
 
-// DebugRecord adds DEBUG level to provided record and queues it for processing.
-func DebugRecord(record Record) {
-	defaultLog.DebugRecord(record)
+// DebugCtx logs message in DEBUG level with provided context.
+func DebugCtx(message string, ctx Ctx) {
+	rootLogger.DebugCtx(message, ctx)
 }
 
 // Info creates log record and queues it for processing with INFO level.
 // Additional parameters have same semantics as in Log method.
 func Info(event string, pairs ...string) {
-	defaultLog.Info(event, pairs...)
+	rootLogger.Info(event, pairs...)
 }
 
-// InfoRecord adds INFO level to provided record and queues it for processing.
-func InfoRecord(record Record) {
-	defaultLog.InfoRecord(record)
+// InfoCtx logs message in INFO level with provided context.
+func InfoCtx(message string, ctx Ctx) {
+	rootLogger.InfoCtx(message, ctx)
 }
 
 // Warning creates log record and queues it for processing with WARNING level.
 // Additional parameters have same semantics as in Log method.
 func Warning(event string, pairs ...string) {
-	defaultLog.Warning(event, pairs...)
+	rootLogger.Warning(event, pairs...)
 }
 
-// WarningRecord adds WARNING level to provided record and queues it for processing.
-func WarningRecord(record Record) {
-	defaultLog.WarningRecord(record)
+// WarningCtx logs message in WARNING level with provided context.
+func WarningCtx(message string, ctx Ctx) {
+	rootLogger.WarningCtx(message, ctx)
 }
 
 // Error creates log record and queues it for processing with ERROR level.
 // Additional parameters have same semantics as in Log method.
 func Error(event string, pairs ...string) {
-	defaultLog.Error(event, pairs...)
+	rootLogger.Error(event, pairs...)
 }
 
-// ErrorRecord adds ERROR level to provided record and queues it for processing.
-func ErrorRecord(record Record) {
-	defaultLog.ErrorRecord(record)
+// ErrorCtx logs message in ERROR level with provided context.
+func ErrorCtx(message string, ctx Ctx) {
+	rootLogger.ErrorCtx(message, ctx)
 }
 
 // Critical creates log record and queues it for processing with CRITICAL level.
 // Additional parameters have same semantics as in Log method.
 func Critical(event string, pairs ...string) {
-	defaultLog.Critical(event, pairs...)
+	rootLogger.Critical(event, pairs...)
 }
 
-// CriticalRecord adds CRITICAL level to provided record and queues it for processing.
-func CriticalRecord(record Record) {
-	defaultLog.CriticalRecord(record)
+// CriticalCtx logs message in CRITICAL level with provided context.
+func CriticalCtx(message string, ctx Ctx) {
+	rootLogger.CriticalCtx(message, ctx)
 }

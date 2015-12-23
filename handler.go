@@ -2,8 +2,8 @@ package ligno
 
 import (
 	"fmt"
-	"os"
 	"io"
+	"os"
 )
 
 // Handler processes log records and writes them to appropriate destination.
@@ -28,7 +28,7 @@ type LevelFilter struct {
 
 // ShouldLog returns true if record level is higher or equal to on set in this LevelFilter.
 func (f LevelFilter) ShouldLog(r Record) bool {
-	should := r.Level() >= f.Level
+	should := r.Level >= f.Level
 	return should
 }
 

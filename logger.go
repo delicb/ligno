@@ -41,13 +41,13 @@ var loggerTracker = tracker{
 	loggerCreated: make(chan *Logger),
 }
 
-var defaultLog *Logger
+var rootLogger *Logger
 
 func init() {
 	go loggerTracker.run()
 	// done here instead of in default to make sure that tracker is
 	// running before creating any loggers
-	defaultLog = New(nil, []Handler{stdoutHandler})
+	rootLogger = New(nil, []Handler{stdoutHandler})
 }
 
 // WaitAll blocks until all loggers are finished with message processing.
@@ -74,6 +74,7 @@ func WaitAllTimeout(t time.Duration) bool {
 }
 
 type loggerState uint8
+
 const (
 	loggerRunning loggerState = iota
 	loggerStopped
@@ -88,7 +89,7 @@ type Logger struct {
 	// Context in which logger is operating. Basically, this is set of
 	// key-value pairs that will be added to every record logged with this
 	// logger. They have lowest priority.
-	Context Record
+	Context Ctx
 	// Handlers is slice of handlers for processing messages.
 	Handlers []Handler
 	// Parent is logger that this logger was created from.
@@ -102,20 +103,27 @@ type Logger struct {
 	records chan Record
 	// propagate is flag that determines if records will be propagated to
 	// parent logger for processing too.
-	propagate      bool
+	propagate bool
 	// notifyFinished is channel of channels. When someone wants to be notified
 	// when logger processed all queued records, it sends channel that will be
 	// closed after last queued record is processed to notifyFinished.
 	notifyFinished chan chan struct{}
 	// toProcess is number of messages left to process in this logger.
-	toProcess      int32
+	toProcess int32
 	// state represents state in which logger is currently
-	state          loggerState
-	stateMu        sync.RWMutex
+	state struct {
+		sync.RWMutex
+		val loggerState
+	}
+	// level is lowest level that this logger will process
+	level struct {
+		sync.RWMutex
+		val Level
+	}
 }
 
 // New creates new instance of logger and starts it so it is ready for processing.
-func New(context Record, handlers []Handler) *Logger {
+func New(context Ctx, handlers []Handler) *Logger {
 	l := &Logger{
 		Context:        context,
 		Handlers:       handlers,
@@ -125,15 +133,18 @@ func New(context Record, handlers []Handler) *Logger {
 	}
 	go l.handle()
 	go l.processRecords()
-	l.stateMu.Lock()
-	l.state = loggerRunning
-	l.stateMu.Unlock()
+	l.state.Lock()
+	l.state.val = loggerRunning
+	l.state.Unlock()
+	l.level.Lock()
+	l.level.val = DEBUG
+	l.level.Unlock()
 	loggerTracker.loggerCreated <- l
 	return l
 }
 
 // SubLogger creates and returns new logger whose parent is current logger.
-func (l *Logger) SubLogger(context Record, handlers []Handler, propagate bool) *Logger {
+func (l *Logger) SubLogger(context Ctx, handlers []Handler, propagate bool) *Logger {
 	newLogger := New(context, handlers)
 	newLogger.Parent = l
 	newLogger.propagate = propagate
@@ -179,7 +190,7 @@ func (l *Logger) handle() {
 func (l *Logger) processRecords() {
 	for {
 		select {
-		case data, ok := <-l.rawRecords:
+		case record, ok := <-l.rawRecords:
 			if !ok {
 				return
 			}
@@ -193,36 +204,35 @@ func (l *Logger) processRecords() {
 				current = current.Parent
 			}
 			// merge context of all parents backwards, because children can override parents
-			mergedData := make(Record)
+			mergedData := make(Ctx)
 			for i := len(loggerChain) - 1; i >= 0; i-- {
 				for k, v := range loggerChain[i].Context {
 					mergedData[k] = v
 				}
 			}
 			// finally, add provided data to override all context keys
-			for k, v := range data {
+			for k, v := range record.Context {
 				mergedData[k] = v
 			}
-			l.records <- mergedData
+			record.Context = mergedData
+			l.records <- record
 			if l.propagate && l.Parent != nil {
-				l.Parent.log(data)
+				l.Parent.log(record)
 			}
 		}
 	}
 }
 
 // log creates record suitable for processing and sends it to messages chan.
-func (l *Logger) log(data Record) {
-	l.stateMu.RLock()
-	defer l.stateMu.RUnlock()
-	if l.state == loggerStopped {
+func (l *Logger) log(record Record) {
+	l.state.RLock()
+	defer l.state.RUnlock()
+	if l.state.val == loggerStopped || !l.shouldProcessLevel(record.Level) {
 		return
 	}
-	if _, ok := data[TimeKey]; !ok {
-		data[TimeKey] = time.Now().UTC()
-	}
+
 	atomic.AddInt32(&l.toProcess, 1)
-	l.rawRecords <- data
+	l.rawRecords <- record
 }
 
 // Stop stops listening for new messages sent to this logger.
@@ -230,9 +240,9 @@ func (l *Logger) log(data Record) {
 // silently be dropped.
 // Stopping loggers stops processing goroutines and cleans up resources.
 func (l *Logger) Stop() {
-	l.stateMu.Lock()
-	defer l.stateMu.Unlock()
-	l.state = loggerStopped
+	l.state.Lock()
+	defer l.state.Unlock()
+	l.state.val = loggerStopped
 	close(l.rawRecords)
 }
 
@@ -257,9 +267,9 @@ func (l *Logger) StopAndWaitTimeout(t time.Duration) (finished bool) {
 
 // IsRunning returns boolean indicating if this logger is still running.
 func (l *Logger) IsRunning() bool {
-	l.stateMu.RLock()
-	defer l.stateMu.RUnlock()
-	return l.state == loggerRunning
+	l.state.RLock()
+	defer l.state.RUnlock()
+	return l.state.val == loggerRunning
 }
 
 // wait blocks until all messages on messages channel are processed.
@@ -303,10 +313,12 @@ func (l *Logger) WaitTimeout(t time.Duration) (finished bool) {
 //   l.Log(INFO, "User logged in", "user_id", user_id, "platform", PLATFORM_NAME)
 // will be translated into log record with following keys:
 //  {LEVEL: INFO", EVENT: "User logged in", "user_id": user_id, "platform": PLATFORM_NAME}
-func (l *Logger) Log(level Level, event string, pairs ...string) {
-	var d = make(Record)
-	d[EventKey] = event
-	d[LevelKey] = level
+func (l *Logger) Log(level Level, message string, pairs ...string) {
+	var d = make(Ctx)
+
+	//	d[EventKey] = event
+	//	d[LevelKey] = level
+	//	d[TimeKey] = creationTime
 	// make sure that number of items in data is even
 	if len(pairs)%2 != 0 {
 		pairs = append(pairs, "")
@@ -314,70 +326,112 @@ func (l *Logger) Log(level Level, event string, pairs ...string) {
 	for i := 0; i < len(pairs); i += 2 {
 		d[pairs[i]] = pairs[i+1]
 	}
-	l.log(d)
+	r := Record{
+		Time:    time.Now().UTC(),
+		Level:   level,
+		Message: message,
+		Context: d,
+	}
+	l.log(r)
 }
 
-// LogRecord adds provided record to queue for processing.
-func (l *Logger) LogRecord(record Record) {
-	l.log(record)
+// LogCtx adds provided message in specified level.
+func (l *Logger) LogCtx(level Level, message string, data Ctx) {
+	r := Record{
+		Time:    time.Now().UTC(),
+		Level:   level,
+		Context: data,
+	}
+	l.log(r)
 }
 
 // Debug creates log record and queues it for processing with DEBUG level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Debug(event string, pairs ...string) {
-	l.Log(DEBUG, event, pairs...)
+func (l *Logger) Debug(message string, pairs ...string) {
+	l.Log(DEBUG, message, pairs...)
 }
 
-// DebugRecord adds DEBUG level to provided record and queues it for processing.
-func (l *Logger) DebugRecord(record Record) {
-	record[LevelKey] = DEBUG
-	l.LogRecord(record)
+// DebugCtx logs message in DEBUG level with provided context.
+func (l *Logger) DebugCtx(message string, ctx Ctx) {
+	l.LogCtx(DEBUG, message, ctx)
 }
 
 // Info creates log record and queues it for processing with INFO level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Info(event string, pairs ...string) {
-	l.Log(INFO, event, pairs...)
+func (l *Logger) Info(message string, pairs ...string) {
+	l.Log(INFO, message, pairs...)
 }
 
-// InfoRecord adds INFO level to provided record and queues it for processing.
-func (l *Logger) InfoRecord(record Record) {
-	record[LevelKey] = INFO
-	l.LogRecord(record)
+// InfoCtx logs message in INFO level with provided context.
+func (l *Logger) InfoCtx(message string, ctx Ctx) {
+	l.LogCtx(INFO, message, ctx)
 }
 
 // Warning creates log record and queues it for processing with WARNING level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Warning(event string, pairs ...string) {
-	l.Log(WARNING, event, pairs...)
+func (l *Logger) Warning(message string, pairs ...string) {
+	l.Log(WARNING, message, pairs...)
 }
 
-// WarningRecord adds WARNING level to provided record and queues it for processing.
-func (l *Logger) WarningRecord(record Record) {
-	record[LevelKey] = WARNING
-	l.LogRecord(record)
+// WarningCtx logs message in WARNING level with provided context.
+func (l *Logger) WarningCtx(message string, ctx Ctx) {
+	l.LogCtx(WARNING, message, ctx)
 }
 
 // Error creates log record and queues it for processing with ERROR level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Error(event string, pairs ...string) {
-	l.Log(ERROR, event, pairs...)
+func (l *Logger) Error(message string, pairs ...string) {
+	l.Log(ERROR, message, pairs...)
 }
 
-// ErrorRecord adds ERROR level to provided record and queues it for processing.
-func (l *Logger) ErrorRecord(record Record) {
-	record[LevelKey] = ERROR
-	l.LogRecord(record)
+// ErrorCtx logs message in ERROR level with provided context.
+func (l *Logger) ErrorCtx(message string, ctx Ctx) {
+	l.LogCtx(ERROR, message, ctx)
 }
 
 // Critical creates log record and queues it for processing with CRITICAL level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Critical(event string, pairs ...string) {
-	l.Log(CRITICAL, event, pairs...)
+func (l *Logger) Critical(message string, pairs ...string) {
+	l.Log(CRITICAL, message, pairs...)
 }
 
-// CriticalRecord adds CRITICAL level to provided record and queues it for processing.
-func (l *Logger) CriticalRecord(record Record) {
-	record[LevelKey] = INFO
-	l.LogRecord(record)
+// CriticalCtx logs message in CRITICAL level with provided context.
+func (l *Logger) CriticalCtx(message string, ctx Ctx) {
+	l.LogCtx(CRITICAL, message, ctx)
+}
+
+func (l *Logger) shouldProcessLevel(level Level) bool {
+	l.level.RLock()
+	defer l.level.RUnlock()
+	return l.level.val <= level
+}
+
+// IsDebug returns true if logger will process messages in DEBUG level
+func (l *Logger) IsDebug() bool {
+	return l.shouldProcessLevel(DEBUG)
+}
+
+// IsInfo returns true if logger will process messages in INFO level
+func (l *Logger) IsInfo() bool {
+	return l.shouldProcessLevel(DEBUG)
+}
+
+// IsWarning returns true if logger will process messages in WARNING level
+func (l *Logger) IsWarning() bool {
+	return l.shouldProcessLevel(DEBUG)
+}
+
+// IsError returns true if logger will process messages in ERROR level
+func (l *Logger) IsError() bool {
+	return l.shouldProcessLevel(DEBUG)
+}
+
+// IsCritical returns true if logger will process messages in Critical level
+func (l *Logger) IsCritical() bool {
+	return l.shouldProcessLevel(DEBUG)
+}
+
+// IsLevel return true if logger will process messages in provided level.
+func (l *Logger) IsLevel(level Level) bool {
+	return l.shouldProcessLevel(level)
 }
