@@ -23,7 +23,7 @@ func (ff FormatterFunc) Format(record Record) []byte {
 	return ff(record)
 }
 
-// defaultTimeFormat is default time format.
+// DefaultTimeFormat is default time format.
 const DefaultTimeFormat = "2006-01-02 15:05:06.0000"
 
 // SimpleFormat returns formatter that formats record with bare minimum of information.
