@@ -51,7 +51,7 @@ func (df *DefaultFormatter) Format(record Record) string {
 			buff.WriteString(" ")
 		}
 	}
-	return fmt.Sprintf("%-25s %-10s %-15s [%s]", time, record.Level, record.Message, buff.String())
+	return fmt.Sprintf("%-25s %-10s %-15s [%s]\n", time, record.Level, record.Message, buff.String())
 }
 
 // defaultFormatter is instance of DefaultFormatter.

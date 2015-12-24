@@ -6,10 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"os"
 )
 
 // root logger is parent of all loggers and it always exists.
-var rootLogger = createLogger(nil, &StdoutHandler{}, NOTSET, 2048, 2048)
+var rootLogger = createLogger(nil, StreamHandler(os.Stdout, defaultFormatter), NOTSET, 2048, 2048)
 
 // WaitAll blocks until all loggers are finished with message processing.
 func WaitAll() {
@@ -263,6 +264,9 @@ func (l *Logger) Stop() {
 	close(l.rawRecords)
 	if l.relationship.parent != nil {
 		l.relationship.parent.removeChild(l)
+	}
+	if handlerCloser, ok := l.Handler().(HandlerCloser); ok {
+		handlerCloser.Close()
 	}
 }
 

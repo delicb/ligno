@@ -9,7 +9,30 @@ import (
 // Handler processes log records and writes them to appropriate destination.
 type Handler interface {
 	// Handle processes provided log record.
-	Handle(Record)
+	Handle(Record) error
+}
+
+// HandlerCloser is interface that allows handlers to be closed.
+// If handler implements this interface, when logger is stopped, Close will
+// be called.
+type HandlerCloser interface {
+	Close()
+}
+
+// HandlerFunc is function that implements Handler interface.
+type HandlerFunc func(Record) error
+
+// Handle just calls HandlerFunc.
+func (hf HandlerFunc) Handle(record Record) error {
+	return hf(record)
+}
+
+
+func StreamHandler(out io.Writer, formatter Formatter) Handler {
+	return HandlerFunc(func(record Record) error {
+		_, err := out.Write([]byte(formatter.Format(record)))
+		return err
+	})
 }
 
 // combiningHandler combines multiple other handlers
@@ -18,9 +41,20 @@ type combiningHandler struct {
 }
 
 // Handle processes record by passing it to all internal handler of this handler.
-func (ch *combiningHandler) Handle(record Record) {
+func (ch *combiningHandler) Handle(record Record) error {
+	var err error
 	for _, h := range ch.Handlers {
-		h.Handle(record)
+		err = h.Handle(record)
+	}
+	return err
+}
+
+// Close closes all internal handlers if they implement HandlerCloser interface.
+func (ch *combiningHandler) Close() {
+	for _, h := range ch.Handlers {
+		if handlerCloser, ok := h.(HandlerCloser); ok {
+			handlerCloser.Close()
+		}
 	}
 }
 
@@ -78,9 +112,9 @@ type StdoutHandler struct {
 }
 
 // Handle processes provided log records by printing it to standard output.
-func (sh *StdoutHandler) Handle(record Record) {
+func (sh *StdoutHandler) Handle(record Record) error {
 	if !shouldLog(record, sh.Filters) {
-		return
+		return nil
 	}
 	var formatter Formatter
 	if sh.Formatter == nil {
@@ -88,7 +122,8 @@ func (sh *StdoutHandler) Handle(record Record) {
 	} else {
 		formatter = sh.Formatter
 	}
-	fmt.Fprintln(_out, formatter.Format(record))
+	_, err := fmt.Fprintln(_out, formatter.Format(record))
+	return err
 }
 
 // stdoutHandler is default instance of StdoutHandler
