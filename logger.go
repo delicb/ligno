@@ -1,16 +1,15 @@
 package ligno
 
 import (
-	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
-	"os"
 )
 
 // root logger is parent of all loggers and it always exists.
-var rootLogger = createLogger(nil, StreamHandler(os.Stdout, defaultFormatter), NOTSET, 2048, 2048)
+var rootLogger = createLogger(nil, StreamHandler(os.Stdout, SimpleFormat()), NOTSET, 2048, 2048)
 
 // WaitAll blocks until all loggers are finished with message processing.
 func WaitAll() {
@@ -133,9 +132,6 @@ func (l *Logger) addChild(child *Logger, preventPropagation bool) {
 }
 
 func (l *Logger) removeChild(child *Logger) {
-	if l == nil {
-		fmt.Println("Got nil receiver")
-	}
 	l.relationship.Lock()
 	defer l.relationship.Unlock()
 	removeIndex := -1
@@ -189,8 +185,7 @@ func (l *Logger) handle() {
 				// reset notification channel
 				notifyFinished = nil
 			}
-		case h := <- l.handlerChanged:
-			fmt.Println("Got new handler:", handler)
+		case h := <-l.handlerChanged:
 			handler = h
 		case notifyFinished = <-l.notifyFinished:
 			// check count right away and notify that processing is done if possible

@@ -1,9 +1,7 @@
 package ligno
 
 import (
-	"fmt"
 	"io"
-	"os"
 )
 
 // Handler processes log records and writes them to appropriate destination.
@@ -27,12 +25,35 @@ func (hf HandlerFunc) Handle(record Record) error {
 	return hf(record)
 }
 
-
+// StreamHandler writes records to provided io.Writer
 func StreamHandler(out io.Writer, formatter Formatter) Handler {
 	return HandlerFunc(func(record Record) error {
-		_, err := out.Write([]byte(formatter.Format(record)))
+		_, err := out.Write(formatter.Format(record))
 		return err
 	})
+}
+
+// Predicate is function that returns true if record should be logged, false otherwise.
+type Predicate func(Record) bool
+
+// FilterHandler checks records if by using predicate to check if they should
+// be processed and only if they do, record is passed to provided handler.
+func FilterHandler(predicate Predicate, handler Handler) Handler {
+	return HandlerFunc(func(record Record) error {
+		if predicate(record) {
+			return handler.Handle(record)
+		}
+		return nil
+	})
+}
+
+// FilterLevelHandler is FilterHandler with default predicate function that filters
+// all records below provided level.
+func FilterLevelHandler(level Level, handler Handler) Handler {
+	levelPredicate := Predicate(func (record Record) bool {
+		return record.Level >= level
+	})
+	return FilterHandler(levelPredicate, handler)
 }
 
 // combiningHandler combines multiple other handlers
@@ -65,66 +86,3 @@ func CombiningHandler(handlers ...Handler) Handler {
 		Handlers: handlers,
 	}
 }
-
-// Filter determines if log record should be processed further.
-type Filter interface {
-	// ShouldLog returns bool flag that indicates whether message should be
-	// processed or discarded.
-	ShouldLog(Record) bool
-}
-
-// LevelFilter determines if message should be processed or discarded based
-// on level in log record.
-type LevelFilter struct {
-	// Minimal log level that log record has to have in order to pass this filter.
-	Level Level
-}
-
-// ShouldLog returns true if record level is higher or equal to on set in this LevelFilter.
-func (f LevelFilter) ShouldLog(r Record) bool {
-	should := r.Level >= f.Level
-	return should
-}
-
-// shouldLog determines if provided record should be processed based on provided filters.
-// If no filters are provided, true will be returned. Otherwise, if at least one
-// filter determined that record should be logged, true is returned, false otherwise.
-func shouldLog(record Record, filters []Filter) bool {
-	// edge case - if there are not filters, message should be logged
-	if len(filters) == 0 {
-		return true
-	}
-	res := false
-	for _, f := range filters {
-		res = res || f.ShouldLog(record)
-	}
-	return res
-}
-
-var _out io.Writer = os.Stdout
-
-// StdoutHandler is handler that prints log records to standard output.
-type StdoutHandler struct {
-	// Formatter that will be used to format record strings before printing it.
-	Formatter Formatter
-	// Filters to determine if log record should be logged.
-	Filters []Filter
-}
-
-// Handle processes provided log records by printing it to standard output.
-func (sh *StdoutHandler) Handle(record Record) error {
-	if !shouldLog(record, sh.Filters) {
-		return nil
-	}
-	var formatter Formatter
-	if sh.Formatter == nil {
-		formatter = defaultFormatter
-	} else {
-		formatter = sh.Formatter
-	}
-	_, err := fmt.Fprintln(_out, formatter.Format(record))
-	return err
-}
-
-// stdoutHandler is default instance of StdoutHandler
-var stdoutHandler = &StdoutHandler{}

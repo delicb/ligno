@@ -12,50 +12,69 @@ import (
 
 // Formatter is interface for converting log record to string representation.
 type Formatter interface {
-	Format(record Record) string
+	Format(record Record) []byte
 }
 
-// DefaultFormatter converts log record to simple string for printing.
-type DefaultFormatter struct{
-	TimeFormat string
+// FormatterFunc is function type that implements Formatter interface.
+type FormatterFunc func (Record) []byte
+
+// Format is implementation of Formatter interface. It just calls function.
+func (ff FormatterFunc) Format(record Record) []byte {
+	return ff(record)
 }
 
-// defaultTimeFormat is formatting string for time for DefaultFormatter
-const defaultTimeFormat = "2006-01-02 15:05:06.0000"
+// defaultTimeFormat is default time format.
+const DefaultTimeFormat = "2006-01-02 15:05:06.0000"
 
-// Format converts provided log record to format suitable for printing in one line.
-// String produced resembles traditional log message.
-func (df *DefaultFormatter) Format(record Record) string {
-	var timeFormat = defaultTimeFormat
-	if df.TimeFormat != "" {
-		timeFormat = df.TimeFormat
-	}
-	time := record.Time.Format(timeFormat)
-	var buff bytes.Buffer
+// SimpleFormat returns formatter that formats record with bare minimum of information.
+// Intention of this formatter is to simulate standard library formatter.
+func SimpleFormat() Formatter {
+	return FormatterFunc(func(record Record) []byte {
+		buff := new(bytes.Buffer)
+		fmt.Fprintf(buff, "%-25s %s\n", record.Time.Format(DefaultTimeFormat), record.Message)
+		return buff.Bytes()
+	})
+}
 
-	ctx := record.Context
-	keys := make([]string, 0, len(ctx))
-	for k := range ctx {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+// TerminalFormat returns formatter that produces records formatted for easy
+// reading in terminal, but that are a bit richer then SimpleFormat (this one
+// includes context keys)
+func TerminalFormat() Formatter {
+	return FormatterFunc(func(record Record) []byte {
+		time := record.Time.Format(DefaultTimeFormat)
+		buff := &bytes.Buffer{}
 
-	for i := 0; i < len(keys); i++ {
-		k := keys[i]
-		v := strconv.Quote(fmt.Sprintf("%+v", ctx[k]))
-		if strings.IndexFunc(k, needsQuote) >= 0 || k == "" {
-			k = strconv.Quote(k)
+		fmt.Fprintf(buff, "%-25s %-10s %-15s", time, record.Level, record.Message)
+
+		ctx := record.Context
+		keys := make([]string, 0, len(ctx))
+		for k := range ctx {
+			keys = append(keys, k)
 		}
-		buff.WriteString(fmt.Sprintf("%s=%+v", k, v))
-		if i < len(keys)-1 {
-			buff.WriteString(" ")
-		}
-	}
-	return fmt.Sprintf("%-25s %-10s %-15s [%s]\n", time, record.Level, record.Message, buff.String())
-}
+		sort.Strings(keys)
 
-// defaultFormatter is instance of DefaultFormatter.
-var defaultFormatter = &DefaultFormatter{}
+		if len(keys) > 0 {
+			fmt.Fprint(buff, " [")
+		}
+		for i := 0; i < len(keys); i++ {
+			k := keys[i]
+			v := strconv.Quote(fmt.Sprintf("%+v", ctx[k]))
+			if strings.IndexFunc(k, needsQuote) >= 0 || k == "" {
+				k = strconv.Quote(k)
+			}
+			fmt.Fprintf(buff, "%s=%+v", k, v)
+			if i < len(keys)-1 {
+				buff.WriteString(" ")
+			}
+		}
+		if len(keys) > 0 {
+			fmt.Fprint(buff, "]")
+		}
+		fmt.Fprint(buff, "\n")
+		return buff.Bytes()
+
+	})
+}
 
 // Needs quote determines if provided rune is such that word that contains this
 // rune needs to be quoted.
@@ -64,22 +83,22 @@ func needsQuote(r rune) bool {
 		!unicode.IsPrint(r)
 }
 
-// JSONFormatter is simple formatter that only marshals log record to json.
-type JSONFormatter struct{
-	Indent bool
-}
-
-// Format returns JSON representation of provided record.
-func (jf *JSONFormatter) Format(record Record) string {
-	var marshaled []byte
-	var err error
-	if jf.Indent {
-		marshaled, err = json.MarshalIndent(record.Context, "", "    ")
-	} else {
-		marshaled, err = json.Marshal(record)
-	}
-	if err != nil {
-		panic(err)
-	}
-	return string(marshaled)
+// JSONFormat is simple formatter that only marshals log record to json.
+func JSONFormat(pretty bool) Formatter {
+	return FormatterFunc(func(record Record) []byte {
+		var marshaled []byte
+		var err error
+		if pretty {
+			marshaled, err = json.MarshalIndent(record, "", "    ")
+		} else {
+			marshaled, err = json.Marshal(record)
+		}
+		if err != nil {
+			marshaled, _ = json.Marshal(map[string]string{
+				"JSONError": err.Error(),
+			})
+		}
+		marshaled = append(marshaled, '\n')
+		return marshaled
+	})
 }
