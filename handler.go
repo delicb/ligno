@@ -2,6 +2,8 @@ package ligno
 
 import (
 	"io"
+	"os"
+	"fmt"
 )
 
 // Handler processes log records and writes them to appropriate destination.
@@ -85,4 +87,35 @@ func CombiningHandler(handlers ...Handler) Handler {
 	return &combiningHandler{
 		Handlers: handlers,
 	}
+}
+
+// FileHandler writes log records to file with provided name.
+func FileHandler(fileName string, formatter Formatter) Handler{
+	return &fileHandler{
+		fileName: fileName,
+		formatter: formatter,
+	}
+}
+
+type fileHandler struct {
+	fileName string
+	formatter Formatter
+	f *os.File
+}
+
+func (fh *fileHandler) Handle(record Record) error {
+	if fh.f == nil {
+		f, err := os.OpenFile(fh.fileName, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
+		if err != nil {
+			panic(err)
+		}
+		fh.f = f
+	}
+
+	_, err := fh.f.Write(fh.formatter.Format(record))
+	return err
+}
+
+func (fh *fileHandler) Close() {
+	fh.f.Close()
 }
