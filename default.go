@@ -72,3 +72,8 @@ func Critical(event string, pairs ...string) {
 func CriticalCtx(message string, ctx Ctx) {
 	rootLogger.CriticalCtx(message, ctx)
 }
+
+// SetHandler sets new handler for default logger.
+func SetHandler(handler Handler) {
+	rootLogger.SetHandler(handler)
+}

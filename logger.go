@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-var rootLogger *Logger = createLogger(nil, nil, NOTSET, 2048, 2048)
+// root logger is parent of all loggers and it always exists.
+var rootLogger = createLogger(nil, &StdoutHandler{}, NOTSET, 2048, 2048)
 
 // WaitAll blocks until all loggers are finished with message processing.
 func WaitAll() {
@@ -45,6 +46,9 @@ type Logger struct {
 		sync.RWMutex
 		val Handler
 	}
+	// handlerChanged is notification mechanism to notify working goroutines
+	// that they need to switch their handler for further processing.
+	handlerChanged chan Handler
 
 	// relationship holds information about logger parent and children.
 	relationship struct {
@@ -95,6 +99,7 @@ func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint,
 		context:        context,
 		records:        make(chan Record, recordsBuffer),
 		rawRecords:     make(chan Record, rawRecordsBuffer),
+		handlerChanged: make(chan Handler, 1),
 		notifyFinished: make(chan chan struct{}),
 	}
 	// no need to lock access to handler, state or level here
@@ -132,7 +137,7 @@ func (l *Logger) removeChild(child *Logger) {
 	}
 	l.relationship.Lock()
 	defer l.relationship.Unlock()
-	var removeIndex int = -1
+	removeIndex := -1
 	for i, ch := range l.relationship.children {
 		if child == ch {
 			removeIndex = i
@@ -148,22 +153,34 @@ func (l *Logger) removeChild(child *Logger) {
 	}
 }
 
+// SetHandler set handler to this logger to be used from now on.
+func (l *Logger) SetHandler(handler Handler) {
+	l.handler.Lock()
+	l.handler.val = handler
+	// not using defer here because we need to unlock before sending
+	// handler on handlerChanged channel or we might end up with deadlock.
+	l.handler.Unlock()
+	l.handlerChanged <- handler
+}
+
+// Handler returns current handler for this logger
+func (l *Logger) Handler() Handler {
+	l.handler.RLock()
+	defer l.handler.RUnlock()
+	return l.handler.val
+}
+
 // handle is log record processor which takes records from chan and invokes all handlers.
 func (l *Logger) handle() {
-	var handler Handler
-	l.handler.RLock()
-	if l.handler.val != nil {
-		handler = l.handler.val
-	} else {
-		handler = stdoutHandler
-	}
-	l.handler.RUnlock()
-
+	handler := l.Handler()
 	var notifyFinished chan struct{}
 	for {
 		select {
 		case record := <-l.records:
-			handler.Handle(record)
+			// we might not have handler, so check what we got before processing
+			if handler != nil {
+				handler.Handle(record)
+			}
 			atomic.AddInt32(&l.toProcess, -1)
 			// if count dropped to 0, close notification channel
 			if atomic.LoadInt32(&l.toProcess) == 0 && notifyFinished != nil {
@@ -171,6 +188,9 @@ func (l *Logger) handle() {
 				// reset notification channel
 				notifyFinished = nil
 			}
+		case h := <- l.handlerChanged:
+			fmt.Println("Got new handler:", handler)
+			handler = h
 		case notifyFinished = <-l.notifyFinished:
 			// check count right away and notify that processing is done if possible
 			if atomic.LoadInt32(&l.toProcess) == 0 {

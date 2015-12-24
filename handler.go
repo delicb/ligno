@@ -12,7 +12,7 @@ type Handler interface {
 	Handle(Record)
 }
 
-// CombiningHandler combines multiple other handlers
+// combiningHandler combines multiple other handlers
 type combiningHandler struct {
 	Handlers []Handler
 }
@@ -24,9 +24,9 @@ func (ch *combiningHandler) Handle(record Record) {
 	}
 }
 
-// Combining handler creates and returns handler that passes records to all
+// CombiningHandler creates and returns handler that passes records to all
 // provided handlers.
-func CombiningHandler(handlers ...Handler) *combiningHandler {
+func CombiningHandler(handlers ...Handler) Handler {
 	return &combiningHandler{
 		Handlers: handlers,
 	}

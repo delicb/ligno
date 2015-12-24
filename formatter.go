@@ -26,7 +26,7 @@ const defaultTimeFormat = "2006-01-02 15:05:06.0000"
 // Format converts provided log record to format suitable for printing in one line.
 // String produced resembles traditional log message.
 func (df *DefaultFormatter) Format(record Record) string {
-	var timeFormat string = defaultTimeFormat
+	var timeFormat = defaultTimeFormat
 	if df.TimeFormat != "" {
 		timeFormat = df.TimeFormat
 	}
