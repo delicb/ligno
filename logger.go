@@ -83,15 +83,12 @@ type Logger struct {
 		val loggerState
 	}
 	// level is lowest level that this logger will process
-	level struct {
-		sync.RWMutex
-		val Level
-	}
+	level Level
 }
 
 // New creates new instance of logger and starts it so it is ready for processing.
-func New(context Ctx, handler Handler) *Logger {
-	return rootLogger.SubLogger(context, handler, false)
+func New(context Ctx, handler Handler, level Level) *Logger {
+	return rootLogger.SubLogger(context, handler, level, false)
 }
 
 func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint, rawRecordsBuffer uint) *Logger {
@@ -106,7 +103,7 @@ func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint,
 	// since we just created logger and nobody can use it anywhere else.
 	l.handler.val = handler
 	l.state.val = loggerRunning
-	l.level.val = level
+	l.level = level
 	// start logger pipeline
 	go l.handle()
 	go l.processRecords()
@@ -114,8 +111,8 @@ func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint,
 }
 
 // SubLogger creates and returns new logger whose parent is current logger.
-func (l *Logger) SubLogger(context Ctx, handler Handler, preventPropagation bool) *Logger {
-	newLogger := createLogger(context, handler, DEBUG, 2048, 2048)
+func (l *Logger) SubLogger(context Ctx, handler Handler, level Level, preventPropagation bool) *Logger {
+	newLogger := createLogger(context, handler, level, 2048, 2048)
 	l.addChild(newLogger, preventPropagation)
 	return newLogger
 }
@@ -165,6 +162,11 @@ func (l *Logger) Handler() Handler {
 	l.handler.RLock()
 	defer l.handler.RUnlock()
 	return l.handler.val
+}
+
+// Level returns minimal level that this logger will process.
+func (l *Logger) Level() Level {
+	return l.level
 }
 
 // handle is log record processor which takes records from chan and invokes all handlers.
@@ -240,7 +242,7 @@ func (l *Logger) processRecords() {
 func (l *Logger) log(record Record) {
 	l.state.RLock()
 	defer l.state.RUnlock()
-	if l.state.val == loggerStopped || !l.shouldProcessLevel(record.Level) {
+	if l.state.val == loggerStopped || !l.IsEnabledFor(record.Level) {
 		return
 	}
 
@@ -252,7 +254,7 @@ func (l *Logger) log(record Record) {
 // Messages already sent will be processed, but all new messages will
 // silently be dropped.
 // Stopping loggers stops processing goroutines and cleans up resources.
-func (l *Logger) Stop() {
+func (l *Logger) stopAndWait(waitFunc func()) {
 	l.state.Lock()
 	defer l.state.Unlock()
 	l.state.val = loggerStopped
@@ -260,6 +262,7 @@ func (l *Logger) Stop() {
 	if l.relationship.parent != nil {
 		l.relationship.parent.removeChild(l)
 	}
+	waitFunc()
 	if handlerCloser, ok := l.Handler().(HandlerCloser); ok {
 		handlerCloser.Close()
 	}
@@ -270,8 +273,7 @@ func (l *Logger) Stop() {
 // Records already sent will be processed, but all new messages will
 // silently be dropped.
 func (l *Logger) StopAndWait() {
-	l.Stop()
-	l.Wait()
+	l.stopAndWait(l.Wait)
 }
 
 // StopAndWaitTimeout stops listening for new messages sent to this logger and
@@ -280,8 +282,11 @@ func (l *Logger) StopAndWait() {
 // silently be dropped. Return value indicates if all messages are processed (true)
 // or if provided timeout expired (false)
 func (l *Logger) StopAndWaitTimeout(t time.Duration) (finished bool) {
-	l.Stop()
-	return l.WaitTimeout(t)
+	finished = false
+	l.stopAndWait(func() {
+		finished = l.WaitTimeout(t)
+	})
+	return finished
 }
 
 // IsRunning returns boolean indicating if this logger is still running.
@@ -349,11 +354,12 @@ func (l *Logger) WaitTimeout(t time.Duration) (finished bool) {
 // will be translated into log record with following keys:
 //  {LEVEL: INFO", EVENT: "User logged in", "user_id": user_id, "platform": PLATFORM_NAME}
 func (l *Logger) Log(level Level, message string, pairs ...string) {
+	// if level is not sufficient, do not proceed to avoid unneeded allocations
+	if !l.IsEnabledFor(level) {
+		return
+	}
 	var d = make(Ctx)
 
-	//	d[EventKey] = event
-	//	d[LevelKey] = level
-	//	d[TimeKey] = creationTime
 	// make sure that number of items in data is even
 	if len(pairs)%2 != 0 {
 		pairs = append(pairs, "")
@@ -372,6 +378,10 @@ func (l *Logger) Log(level Level, message string, pairs ...string) {
 
 // LogCtx adds provided message in specified level.
 func (l *Logger) LogCtx(level Level, message string, data Ctx) {
+	// if level is not sufficient, do not proceed to avoid unneeded allocations
+	if !l.IsEnabledFor(level) {
+		return
+	}
 	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
@@ -436,38 +446,36 @@ func (l *Logger) CriticalCtx(message string, ctx Ctx) {
 	l.LogCtx(CRITICAL, message, ctx)
 }
 
-func (l *Logger) shouldProcessLevel(level Level) bool {
-	l.level.RLock()
-	defer l.level.RUnlock()
-	return l.level.val <= level
+func (l *Logger) IsEnabledFor(level Level) bool {
+	return l.Level() <= level
 }
 
 // IsDebug returns true if logger will process messages in DEBUG level
 func (l *Logger) IsDebug() bool {
-	return l.shouldProcessLevel(DEBUG)
+	return l.IsEnabledFor(DEBUG)
 }
 
 // IsInfo returns true if logger will process messages in INFO level
 func (l *Logger) IsInfo() bool {
-	return l.shouldProcessLevel(DEBUG)
+	return l.IsEnabledFor(DEBUG)
 }
 
 // IsWarning returns true if logger will process messages in WARNING level
 func (l *Logger) IsWarning() bool {
-	return l.shouldProcessLevel(DEBUG)
+	return l.IsEnabledFor(DEBUG)
 }
 
 // IsError returns true if logger will process messages in ERROR level
 func (l *Logger) IsError() bool {
-	return l.shouldProcessLevel(DEBUG)
+	return l.IsEnabledFor(DEBUG)
 }
 
 // IsCritical returns true if logger will process messages in Critical level
 func (l *Logger) IsCritical() bool {
-	return l.shouldProcessLevel(DEBUG)
+	return l.IsEnabledFor(DEBUG)
 }
 
 // IsLevel return true if logger will process messages in provided level.
 func (l *Logger) IsLevel(level Level) bool {
-	return l.shouldProcessLevel(level)
+	return l.IsEnabledFor(level)
 }
