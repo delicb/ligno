@@ -3,7 +3,8 @@ package ligno
 import (
 	"io"
 	"os"
-	"fmt"
+	"bytes"
+	"sync"
 )
 
 // Handler processes log records and writes them to appropriate destination.
@@ -118,4 +119,29 @@ func (fh *fileHandler) Handle(record Record) error {
 
 func (fh *fileHandler) Close() {
 	fh.f.Close()
+}
+
+func NullHandler() Handler {
+	return HandlerFunc(func(record Record) error {
+		return nil
+	})
+}
+
+type MemoryHandler struct {
+	buffer *bytes.Buffer
+	formatter Formatter
+	mu sync.Mutex
+}
+
+func (mh *MemoryHandler) Handle(record Record) error {
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	_, err := mh.buffer.Write(mh.formatter.Format(record))
+	return err
+}
+
+func (mh *MemoryHandler) Content() string {
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	return mh.buffer.String()
 }
