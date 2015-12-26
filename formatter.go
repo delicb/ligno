@@ -31,7 +31,10 @@ const DefaultTimeFormat = "2006-01-02 15:05:06.0000"
 func SimpleFormat() Formatter {
 	return FormatterFunc(func(record Record) []byte {
 		buff := new(bytes.Buffer)
-		fmt.Fprintf(buff, "%-25s %s\n", record.Time.Format(DefaultTimeFormat), record.Message)
+		buff.WriteString(record.Time.Format(DefaultTimeFormat))
+		buff.WriteString(" ")
+		buff.WriteString(record.Message)
+		buff.WriteString("\n")
 		return buff.Bytes()
 	})
 }
