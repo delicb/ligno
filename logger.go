@@ -9,7 +9,11 @@ import (
 )
 
 // root logger is parent of all loggers and it always exists.
-var rootLogger = createLogger(nil, StreamHandler(os.Stdout, SimpleFormat()), NOTSET, 2048, 2048)
+var rootLogger = createLogger(LoggerOptions{
+	Context:    nil,
+	Handler:    StreamHandler(os.Stderr, SimpleFormat()),
+	BufferSize: 2048,
+})
 
 // WaitAll blocks until all loggers are finished with message processing.
 func WaitAll() {
@@ -40,15 +44,15 @@ type Logger struct {
 	// Context in which logger is operating. Basically, this is set of
 	// key-value pairs that will be added to every record logged with this
 	// logger. They have lowest priority.
-	context        Ctx
+	context Ctx
 	// handler is backed for processing records.
-	handler        *replaceableHandler
+	handler *replaceableHandler
 	// handlerChanged is notification mechanism to notify working goroutines
 	// that they need to switch their handler for further processing.
 	handlerChanged chan Handler
 
 	// relationship holds information about logger parent and children.
-	relationship   struct {
+	relationship struct {
 		sync.RWMutex
 		// parent is this logger's parent. Final context of record is created
 		// by combining all parents contexts and if preventPropagation is false
@@ -83,36 +87,73 @@ type Logger struct {
 	level Level
 }
 
-// New creates new instance of logger and starts it so it is ready for processing.
-func New(context Ctx, handler Handler, level Level) *Logger {
-	return rootLogger.SubLogger(context, handler, level, 2048, true)
+// LoggerOptions is container for configuration options for logger instances.
+// Empty value is valid for initializing logger.
+type LoggerOptions struct {
+	// Context that logger should have.
+	Context Ctx
+	// Handler for processing records.
+	Handler Handler
+	// Level is minimal level that logger will process.
+	Level Level
+	// BufferSize is size of buffer for records that will be process async.
+	BufferSize int
+	// PreventPropagation is flag that indicates if records should be passed
+	// to parent logger for processing.
+	PreventPropagation bool
 }
 
-func createLogger(context Ctx, handler Handler, level Level, recordsBuffer int, rawRecordsBuffer int) *Logger {
+// NewWithOptions creates new instance of logger with provided options and starts
+// it, so it is ready for processing.
+func NewWithOptions(options LoggerOptions) *Logger {
+	return createLogger(options)
+}
+
+// New creates new instance of logger and starts it so it is ready for processing.
+func New() *Logger {
+	return createLogger(LoggerOptions{})
+}
+
+// createLogger creates new instance of logger, initializes all values based
+// on provided options and starts worker goroutines.
+func createLogger(options LoggerOptions) *Logger {
 	rh := new(replaceableHandler)
-	rh.Replace(handler)
-	l := &Logger{
-		context:        context,
-		records:        make(chan *Record, recordsBuffer),
-		rawRecords:     make(chan *Record, rawRecordsBuffer),
-		handlerChanged: make(chan Handler, 1),
-		notifyFinished: make(chan chan struct{}),
-		handler: rh,
+	rh.Replace(options.Handler)
+	var buffSize = 0
+	if options.BufferSize > 0 {
+		buffSize = options.BufferSize
+	} else {
+		buffSize = 1024
 	}
-	// no need to lock access to handler, state or level here
-	// since we just created logger and nobody can use it anywhere else.
+	l := &Logger{
+		context:        options.Context,
+		records:        make(chan *Record, buffSize),
+		rawRecords:     make(chan *Record, buffSize),
+		notifyFinished: make(chan chan struct{}),
+		handler:        rh,
+		level:          options.Level,
+	}
+	// no need to lock access to state here since we just created logger
+	// and nobody can use it anywhere else at the moment.
 	l.state.val = loggerRunning
-	l.level = level
-	// start logger pipeline
 	go l.handle()
 	go l.processRecords()
 	return l
 }
 
-// SubLogger creates and returns new logger whose parent is current logger.
-func (l *Logger) SubLogger(context Ctx, handler Handler, level Level, bufferSize int, preventPropagation bool) *Logger {
-	newLogger := createLogger(context, handler, level, bufferSize, bufferSize)
-	l.addChild(newLogger, preventPropagation)
+// SubLogger creates new logger that has current logger as parent with default
+// options and starts it so it is ready for message processing.
+func (l *Logger) SubLogger() *Logger {
+	newLogger := createLogger(LoggerOptions{})
+	l.addChild(newLogger, false)
+	return newLogger
+}
+
+// SubLoggerOptions creates new logger that has current logger as parent with
+// provided options and starts it so it is ready for message processing.
+func (l *Logger) SubLoggerOptions(options LoggerOptions) *Logger {
+	newLogger := createLogger(options)
+	l.addChild(newLogger, options.PreventPropagation)
 	return newLogger
 }
 
@@ -163,7 +204,6 @@ func (l *Logger) Level() Level {
 
 // handle is log record processor which takes records from chan and invokes all handlers.
 func (l *Logger) handle() {
-//	handler := l.Handler()
 	var notifyFinished chan struct{}
 	for {
 		select {
@@ -435,6 +475,7 @@ func (l *Logger) CriticalCtx(message string, ctx Ctx) {
 	l.LogCtx(CRITICAL, message, ctx)
 }
 
+// IsEnabledFor returns true if logger will process records with provided level.
 func (l *Logger) IsEnabledFor(level Level) bool {
 	return l.Level() <= level
 }
