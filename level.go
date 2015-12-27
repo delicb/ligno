@@ -96,10 +96,6 @@ func (l Level) String() string {
 		return fmt.Sprintf("Level(%d)", l)
 	}
 	return levelName
-//	if ll, ok := level2Name[l]; ok {
-//		return ll
-//	}
-//	return fmt.Sprintf("Level(%d)", l)
 }
 
 // MarshalJSON returns levels JSON representation (implementation of json.Marshaler)

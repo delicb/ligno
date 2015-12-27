@@ -40,18 +40,15 @@ type Logger struct {
 	// Context in which logger is operating. Basically, this is set of
 	// key-value pairs that will be added to every record logged with this
 	// logger. They have lowest priority.
-	context Ctx
+	context        Ctx
 	// handler is backed for processing records.
-	handler struct {
-		sync.RWMutex
-		val Handler
-	}
+	handler        *replaceableHandler
 	// handlerChanged is notification mechanism to notify working goroutines
 	// that they need to switch their handler for further processing.
 	handlerChanged chan Handler
 
 	// relationship holds information about logger parent and children.
-	relationship struct {
+	relationship   struct {
 		sync.RWMutex
 		// parent is this logger's parent. Final context of record is created
 		// by combining all parents contexts and if preventPropagation is false
@@ -92,16 +89,18 @@ func New(context Ctx, handler Handler, level Level) *Logger {
 }
 
 func createLogger(context Ctx, handler Handler, level Level, recordsBuffer int, rawRecordsBuffer int) *Logger {
+	rh := new(replaceableHandler)
+	rh.Replace(handler)
 	l := &Logger{
 		context:        context,
 		records:        make(chan Record, recordsBuffer),
 		rawRecords:     make(chan Record, rawRecordsBuffer),
 		handlerChanged: make(chan Handler, 1),
 		notifyFinished: make(chan chan struct{}),
+		handler: rh,
 	}
 	// no need to lock access to handler, state or level here
 	// since we just created logger and nobody can use it anywhere else.
-	l.handler.val = handler
 	l.state.val = loggerRunning
 	l.level = level
 	// start logger pipeline
@@ -149,19 +148,12 @@ func (l *Logger) removeChild(child *Logger) {
 
 // SetHandler set handler to this logger to be used from now on.
 func (l *Logger) SetHandler(handler Handler) {
-	l.handler.Lock()
-	l.handler.val = handler
-	// not using defer here because we need to unlock before sending
-	// handler on handlerChanged channel or we might end up with deadlock.
-	l.handler.Unlock()
-	l.handlerChanged <- handler
+	l.handler.Replace(handler)
 }
 
 // Handler returns current handler for this logger
 func (l *Logger) Handler() Handler {
-	l.handler.RLock()
-	defer l.handler.RUnlock()
-	return l.handler.val
+	return l.handler.Handler()
 }
 
 // Level returns minimal level that this logger will process.
@@ -171,15 +163,12 @@ func (l *Logger) Level() Level {
 
 // handle is log record processor which takes records from chan and invokes all handlers.
 func (l *Logger) handle() {
-	handler := l.Handler()
+//	handler := l.Handler()
 	var notifyFinished chan struct{}
 	for {
 		select {
 		case record := <-l.records:
-			// we might not have handler, so check what we got before processing
-			if handler != nil {
-				handler.Handle(record)
-			}
+			l.handler.Handle(record)
 
 			atomic.AddInt32(&l.toProcess, -1)
 			// if count dropped to 0, close notification channel
@@ -188,8 +177,6 @@ func (l *Logger) handle() {
 				// reset notification channel
 				notifyFinished = nil
 			}
-		case h := <-l.handlerChanged:
-			handler = h
 		case notifyFinished = <-l.notifyFinished:
 			// check count right away and notify that processing is done if possible
 			if atomic.LoadInt32(&l.toProcess) == 0 {
