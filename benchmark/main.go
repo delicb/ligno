@@ -139,24 +139,3 @@ func avg(times []time.Duration) float64 {
 	}
 	return float64(sum) / float64(len(times))
 }
-
-func measure(loggerName string, count int, logFunc func(), afterFunc func()) string {
-	times := make([]time.Duration, 0, count)
-	totalStart := time.Now()
-	for i := 0; i < count; i++ {
-		start := time.Now()
-		logFunc()
-		times = append(times, time.Now().Sub(start))
-	}
-	if afterFunc != nil {
-		afterFunc()
-	}
-	totalEnd := time.Now()
-	avgLogDuration := time.Duration(int64(avg(times)))
-	totalTime := totalEnd.Sub(totalStart)
-	return formatResults(loggerName, avgLogDuration, totalTime)
-}
-
-func formatResults(loggerName string, average time.Duration, total time.Duration) string {
-	return fmt.Sprintf("%-15s average time: %10s, total time: %15s", loggerName, average, total)
-}
