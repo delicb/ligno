@@ -1,0 +1,6 @@
+*.test
+.idea
+*.iml
+*.prof
+*.log
+
