@@ -65,9 +65,9 @@ type Logger struct {
 	// rawMessages is channel for queueing and buffering raw messages from
 	// application which needs to be merged with context and submitted
 	// to final processing
-	rawRecords chan Record
+	rawRecords chan *Record
 	// records is channel for queueing and buffering log records.
-	records chan Record
+	records chan *Record
 	// notifyFinished is channel of channels. When someone wants to be notified
 	// when logger processed all queued records, it sends channel that will be
 	// closed after last queued record is processed to notifyFinished.
@@ -93,8 +93,8 @@ func createLogger(context Ctx, handler Handler, level Level, recordsBuffer int, 
 	rh.Replace(handler)
 	l := &Logger{
 		context:        context,
-		records:        make(chan Record, recordsBuffer),
-		rawRecords:     make(chan Record, rawRecordsBuffer),
+		records:        make(chan *Record, recordsBuffer),
+		rawRecords:     make(chan *Record, rawRecordsBuffer),
 		handlerChanged: make(chan Handler, 1),
 		notifyFinished: make(chan chan struct{}),
 		handler: rh,
@@ -227,7 +227,7 @@ func (l *Logger) processRecords() {
 }
 
 // log creates record suitable for processing and sends it to messages chan.
-func (l *Logger) log(record Record) {
+func (l *Logger) log(record *Record) {
 	l.state.RLock()
 	defer l.state.RUnlock()
 	if l.state.val == loggerStopped || !l.IsEnabledFor(record.Level) {
@@ -355,7 +355,7 @@ func (l *Logger) Log(level Level, message string, pairs ...string) {
 		d[pairs[i]] = pairs[i+1]
 	}
 
-	r := Record{
+	r := &Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
 		Message: message,
@@ -371,7 +371,7 @@ func (l *Logger) LogCtx(level Level, message string, data Ctx) {
 		return
 	}
 
-	r := Record{
+	r := &Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
 		Message: message,
