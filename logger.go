@@ -88,10 +88,10 @@ type Logger struct {
 
 // New creates new instance of logger and starts it so it is ready for processing.
 func New(context Ctx, handler Handler, level Level) *Logger {
-	return rootLogger.SubLogger(context, handler, level, false)
+	return rootLogger.SubLogger(context, handler, level, 2048, true)
 }
 
-func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint, rawRecordsBuffer uint) *Logger {
+func createLogger(context Ctx, handler Handler, level Level, recordsBuffer int, rawRecordsBuffer int) *Logger {
 	l := &Logger{
 		context:        context,
 		records:        make(chan Record, recordsBuffer),
@@ -111,8 +111,8 @@ func createLogger(context Ctx, handler Handler, level Level, recordsBuffer uint,
 }
 
 // SubLogger creates and returns new logger whose parent is current logger.
-func (l *Logger) SubLogger(context Ctx, handler Handler, level Level, preventPropagation bool) *Logger {
-	newLogger := createLogger(context, handler, level, 2048, 2048)
+func (l *Logger) SubLogger(context Ctx, handler Handler, level Level, bufferSize int, preventPropagation bool) *Logger {
+	newLogger := createLogger(context, handler, level, bufferSize, bufferSize)
 	l.addChild(newLogger, preventPropagation)
 	return newLogger
 }
@@ -180,6 +180,7 @@ func (l *Logger) handle() {
 			if handler != nil {
 				handler.Handle(record)
 			}
+
 			atomic.AddInt32(&l.toProcess, -1)
 			// if count dropped to 0, close notification channel
 			if atomic.LoadInt32(&l.toProcess) == 0 && notifyFinished != nil {
@@ -245,7 +246,6 @@ func (l *Logger) log(record Record) {
 	if l.state.val == loggerStopped || !l.IsEnabledFor(record.Level) {
 		return
 	}
-
 	atomic.AddInt32(&l.toProcess, 1)
 	l.rawRecords <- record
 }
@@ -367,6 +367,7 @@ func (l *Logger) Log(level Level, message string, pairs ...string) {
 	for i := 0; i < len(pairs); i += 2 {
 		d[pairs[i]] = pairs[i+1]
 	}
+
 	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
@@ -382,6 +383,7 @@ func (l *Logger) LogCtx(level Level, message string, data Ctx) {
 	if !l.IsEnabledFor(level) {
 		return
 	}
+
 	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,

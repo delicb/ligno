@@ -5,9 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"unicode"
+	"strings"
 )
 
 // Formatter is interface for converting log record to string representation.
@@ -30,7 +29,8 @@ const DefaultTimeFormat = "2006-01-02 15:05:06.0000"
 // Intention of this formatter is to simulate standard library formatter.
 func SimpleFormat() Formatter {
 	return FormatterFunc(func(record Record) []byte {
-		buff := new(bytes.Buffer)
+		buff := buffPool.Get()
+		defer buffPool.Put(buff)
 		buff.WriteString(record.Time.Format(DefaultTimeFormat))
 		buff.WriteString(" ")
 		buff.WriteString(record.Message)
@@ -45,9 +45,17 @@ func SimpleFormat() Formatter {
 func TerminalFormat() Formatter {
 	return FormatterFunc(func(record Record) []byte {
 		time := record.Time.Format(DefaultTimeFormat)
-		buff := &bytes.Buffer{}
+		buff := buffPool.Get()
+		defer buffPool.Put(buff)
 
-		fmt.Fprintf(buff, "%-25s %-10s %-15s", time, record.Level, record.Message)
+		buff.WriteString(time)
+		buff.WriteRune(' ')
+		levelName := record.Level.String()
+		buff.WriteString(levelName)
+		padSpaces := levelNameMaxLength - len(levelName) + 2
+		buff.Write(bytes.Repeat([]byte(" "), padSpaces))
+		buff.WriteRune(' ')
+		buff.WriteString(record.Message)
 
 		ctx := record.Context
 		keys := make([]string, 0, len(ctx))
@@ -57,25 +65,31 @@ func TerminalFormat() Formatter {
 		sort.Strings(keys)
 
 		if len(keys) > 0 {
-			fmt.Fprint(buff, " [")
+			buff.WriteString(" [")
 		}
 		for i := 0; i < len(keys); i++ {
 			k := keys[i]
-			v := strconv.Quote(fmt.Sprintf("%+v", ctx[k]))
-			if strings.IndexFunc(k, needsQuote) >= 0 || k == "" {
-				k = strconv.Quote(k)
+			keyQuote := strings.IndexFunc(k, needsQuote) >= 0 || k == ""
+			if keyQuote {
+				buff.WriteRune('"')
 			}
-			fmt.Fprintf(buff, "%s=%+v", k, v)
+			buff.WriteString(k)
+			if keyQuote {
+				buff.WriteRune('"')
+			}
+			buff.WriteRune('=')
+			buff.WriteRune('"')
+			buff.WriteString(fmt.Sprintf("%+v", ctx[k]))
+			buff.WriteRune('"')
 			if i < len(keys)-1 {
-				buff.WriteString(" ")
+				buff.WriteRune(' ')
 			}
 		}
 		if len(keys) > 0 {
-			fmt.Fprint(buff, "]")
+			buff.WriteRune(']')
 		}
-		fmt.Fprint(buff, "\n")
+		buff.WriteRune('\n')
 		return buff.Bytes()
-
 	})
 }
 

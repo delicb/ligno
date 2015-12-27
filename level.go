@@ -24,25 +24,34 @@ const (
 
 var (
 	// level2Name is map from level to name of known level names.
-	level2Name = map[Level]string{
-		NOTSET:   "NOTSET",
-		DEBUG:    "DEBUG",
-		INFO:     "INFO",
-		WARNING:  "WARNING",
-		ERROR:    "ERROR",
-		CRITICAL: "CRITICAL",
-	}
+	level2Name = make(map[Level]string)
 	// name2level is map from name to level of known level names.
-	name2Level = map[string]Level{
-		"NOTSET":   NOTSET,
-		"DEBUG":    DEBUG,
-		"INFO":     INFO,
-		"WARNING":  WARNING,
-		"ERROR":    ERROR,
-		"CRITICAL": CRITICAL,
-	}
+	name2Level = make(map[string]Level)
+	levelNameMaxLength = 0
 	mu sync.RWMutex
 )
+
+func init() {
+	AddLevel("NOTSET", NOTSET)
+	AddLevel("DEBUG", DEBUG)
+	AddLevel("INFO", INFO)
+	AddLevel("WARNING", WARNING)
+	AddLevel("ERROR", ERROR)
+	AddLevel("CRITICAL", CRITICAL)
+}
+
+func levelMaxLength() int {
+	maxLength := 0
+	mu.RLock()
+	defer mu.RUnlock()
+	for name := range name2Level {
+		nameLength := len(name)
+		if nameLength > maxLength {
+			maxLength = nameLength
+		}
+	}
+	return maxLength
+}
 
 // getLevelName returns name of provided level.
 // If provided level does not exist, empty string is returned.
@@ -62,7 +71,7 @@ func getLevelFromName(name string) (level Level) {
 
 // AddLevel add new level to system with provided name and rank.
 // It is forbidden to register levels that already exist.
-func AddLevel(name string, rank uint) (Level, error) {
+func AddLevel(name string, rank Level) (Level, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	l := Level(rank)
@@ -74,15 +83,23 @@ func AddLevel(name string, rank uint) (Level, error) {
 	}
 	level2Name[l] = name
 	name2Level[name] = l
+	if len(name) > levelNameMaxLength {
+		levelNameMaxLength = len(name)
+	}
 	return l, nil
 }
 
 // String returns level's string representation.
 func (l Level) String() string {
-	if ll, ok := level2Name[l]; ok {
-		return ll
+	levelName := getLevelName(l)
+	if levelName == "" {
+		return fmt.Sprintf("Level(%d)", l)
 	}
-	return fmt.Sprintf("Level(%d)", l)
+	return levelName
+//	if ll, ok := level2Name[l]; ok {
+//		return ll
+//	}
+//	return fmt.Sprintf("Level(%d)", l)
 }
 
 // MarshalJSON returns levels JSON representation (implementation of json.Marshaler)

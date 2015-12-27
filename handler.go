@@ -3,7 +3,6 @@ package ligno
 import (
 	"io"
 	"os"
-	"bytes"
 	"sync"
 )
 
@@ -98,12 +97,14 @@ func FileHandler(fileName string, formatter Formatter) Handler{
 	}
 }
 
+// fileHandler writes log messages to file with provided name.
 type fileHandler struct {
 	fileName string
 	formatter Formatter
 	f *os.File
 }
 
+// Handle writes record to file.
 func (fh *fileHandler) Handle(record Record) error {
 	if fh.f == nil {
 		f, err := os.OpenFile(fh.fileName, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
@@ -117,31 +118,55 @@ func (fh *fileHandler) Handle(record Record) error {
 	return err
 }
 
+// Close closes file were records are being written.
 func (fh *fileHandler) Close() {
 	fh.f.Close()
 }
 
+// NullHandler returns handler that discards all records.
 func NullHandler() Handler {
 	return HandlerFunc(func(record Record) error {
 		return nil
 	})
 }
 
-type MemoryHandler struct {
-	buffer *bytes.Buffer
+// InspectHandler is handler that is able to restore logged message and
+// return them for inspection.
+type InspectHandler interface{
+	Handler
+	Messages() []string
+}
+
+// MemoryHandler stores all records in memory, to be fetched and inspected later.
+type memoryHandler struct {
+	buffer [][]byte
 	formatter Formatter
 	mu sync.Mutex
 }
 
-func (mh *MemoryHandler) Handle(record Record) error {
+// Handle stores formatted record in memory.
+func (mh *memoryHandler) Handle(record Record) error {
 	mh.mu.Lock()
 	defer mh.mu.Unlock()
-	_, err := mh.buffer.Write(mh.formatter.Format(record))
-	return err
+	mh.buffer = append(mh.buffer, mh.formatter.Format(record))
+	return nil
 }
 
-func (mh *MemoryHandler) Content() string {
+// Content returns content sent to logging to memory handler.
+func (mh *memoryHandler) Messages() []string {
 	mh.mu.Lock()
 	defer mh.mu.Unlock()
-	return mh.buffer.String()
+	messages := make([]string, 0, len(mh.buffer))
+	for _, msg := range mh.buffer {
+		messages = append(messages, string(msg))
+	}
+	return messages
+}
+
+// MemoryHandler returns handler instance that saves all message to memory.
+func MemoryHandler(formatter Formatter) InspectHandler {
+	return &memoryHandler{
+		buffer: make([][]byte, 0),
+		formatter: formatter,
+	}
 }
