@@ -3,10 +3,10 @@ package ligno
 import (
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"strings"
 )
 
 // root logger is parent of all loggers and it always exists.
@@ -189,7 +189,7 @@ func GetLoggerOptions(name string, options LoggerOptions) *Logger {
 		if ok {
 			current = child
 		} else {
-			if i == len(parts) - 1 {
+			if i == len(parts)-1 {
 				current = current.SubLoggerOptions(part, options)
 			} else {
 				current = current.SubLogger(part)
@@ -254,7 +254,10 @@ func (l *Logger) handle() {
 	var notifyFinished chan struct{}
 	for {
 		select {
-		case record := <-l.records:
+		case record, ok := <-l.records:
+			if !ok {
+				return
+			}
 			l.handler.Handle(record)
 
 			atomic.AddInt32(&l.toProcess, -1)
@@ -275,6 +278,15 @@ func (l *Logger) handle() {
 	}
 }
 
+// buildContext builds context from this logger ant all its parents.
+// TODO: Maybe keep context stating per logger, so that we do not have to build it all the time
+func (l *Logger) buildContext() Ctx {
+	if l.relationship.parent == nil {
+		return l.context
+	}
+	return l.relationship.parent.context.merge(l.context)
+}
+
 // processRecords creates full records from provided user record and this and
 // all parents contexts.
 func (l *Logger) processRecords() {
@@ -284,27 +296,9 @@ func (l *Logger) processRecords() {
 			if !ok {
 				return
 			}
-			//	for data := range l.rawRecords {
-			var current = l
-			var loggerChain = make([]*Logger, 0, 5)
 
-			// create list of all parents
-			for current != nil {
-				loggerChain = append(loggerChain, current)
-				current = current.relationship.parent
-			}
-			// merge context of all parents backwards, because children can override parents
-			mergedData := make(Ctx)
-			for i := len(loggerChain) - 1; i >= 0; i-- {
-				for k, v := range loggerChain[i].context {
-					mergedData[k] = v
-				}
-			}
-			// finally, add provided data to override all context keys
-			for k, v := range record.Context {
-				mergedData[k] = v
-			}
-			record.Context = mergedData
+			record.Context = l.buildContext().merge(record.Context)
+
 			l.records <- record
 			if !l.relationship.preventPropagation && l.relationship.parent != nil {
 				l.relationship.parent.log(record)
@@ -331,12 +325,19 @@ func (l *Logger) log(record Record) {
 func (l *Logger) stopAndWait(waitFunc func()) {
 	l.state.Lock()
 	defer l.state.Unlock()
+	// mark logger as stopped
 	l.state.val = loggerStopped
+	// stop processing of raw records
 	close(l.rawRecords)
+	// break relationship
 	if l.relationship.parent != nil {
 		l.relationship.parent.removeChild(l)
 	}
+	// wait for all records that have already arrived to processed
 	waitFunc()
+	// stop processing all records
+	close(l.records)
+	// close handler, if it supports closing.
 	if handlerCloser, ok := l.Handler().(HandlerCloser); ok {
 		handlerCloser.Close()
 	}
