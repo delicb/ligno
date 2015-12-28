@@ -11,4 +11,5 @@ type Record struct {
 	Level   Level     `json:"level"`
 	Message string    `json:"message"`
 	Context Ctx       `json:"context"`
+	Logger  *Logger   `json:"-"`
 }

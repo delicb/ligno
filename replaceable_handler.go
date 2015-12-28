@@ -20,7 +20,7 @@ func (h *replaceableHandler) Handler() Handler {
 
 // Handle is implementation of Handler interface. It only passes record
 // to underlying handler if it is set.
-func (h *replaceableHandler) Handle(r *Record) error {
+func (h *replaceableHandler) Handle(r Record) error {
 	handler := h.Handler()
 	if handler != nil {
 		return handler.Handle(r)

@@ -6,10 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"strings"
 )
 
 // root logger is parent of all loggers and it always exists.
-var rootLogger = createLogger(LoggerOptions{
+var rootLogger = createLogger("", LoggerOptions{
 	Context:    nil,
 	Handler:    StreamHandler(os.Stderr, SimpleFormat()),
 	BufferSize: 2048,
@@ -41,6 +42,8 @@ const (
 // messages and context (set of key-value pairs that will be include
 // in every log record).
 type Logger struct {
+	// name is name of this logger.
+	name string
 	// Context in which logger is operating. Basically, this is set of
 	// key-value pairs that will be added to every record logged with this
 	// logger. They have lowest priority.
@@ -61,7 +64,8 @@ type Logger struct {
 		// read it without concurrency protection.
 		parent *Logger
 		// children is slice of all loggers that have this logger as parent.
-		children []*Logger
+		//		children []*Logger
+		children map[string]*Logger
 		// preventPropagation is flag that indicates if propagation of log
 		// records to parent should be prevented.
 		preventPropagation bool
@@ -69,9 +73,9 @@ type Logger struct {
 	// rawMessages is channel for queueing and buffering raw messages from
 	// application which needs to be merged with context and submitted
 	// to final processing
-	rawRecords chan *Record
+	rawRecords chan Record
 	// records is channel for queueing and buffering log records.
-	records chan *Record
+	records chan Record
 	// notifyFinished is channel of channels. When someone wants to be notified
 	// when logger processed all queued records, it sends channel that will be
 	// closed after last queued record is processed to notifyFinished.
@@ -103,20 +107,9 @@ type LoggerOptions struct {
 	PreventPropagation bool
 }
 
-// NewWithOptions creates new instance of logger with provided options and starts
-// it, so it is ready for processing.
-func NewWithOptions(options LoggerOptions) *Logger {
-	return createLogger(options)
-}
-
-// New creates new instance of logger and starts it so it is ready for processing.
-func New() *Logger {
-	return createLogger(LoggerOptions{})
-}
-
 // createLogger creates new instance of logger, initializes all values based
 // on provided options and starts worker goroutines.
-func createLogger(options LoggerOptions) *Logger {
+func createLogger(name string, options LoggerOptions) *Logger {
 	rh := new(replaceableHandler)
 	rh.Replace(options.Handler)
 	var buffSize = 0
@@ -126,9 +119,10 @@ func createLogger(options LoggerOptions) *Logger {
 		buffSize = 1024
 	}
 	l := &Logger{
+		name:           name,
 		context:        options.Context,
-		records:        make(chan *Record, buffSize),
-		rawRecords:     make(chan *Record, buffSize),
+		records:        make(chan Record, buffSize),
+		rawRecords:     make(chan Record, buffSize),
 		notifyFinished: make(chan chan struct{}),
 		handler:        rh,
 		level:          options.Level,
@@ -136,6 +130,8 @@ func createLogger(options LoggerOptions) *Logger {
 	// no need to lock access to state here since we just created logger
 	// and nobody can use it anywhere else at the moment.
 	l.state.val = loggerRunning
+	l.relationship.children = make(map[string]*Logger)
+	l.relationship.preventPropagation = options.PreventPropagation
 	go l.handle()
 	go l.processRecords()
 	return l
@@ -143,48 +139,81 @@ func createLogger(options LoggerOptions) *Logger {
 
 // SubLogger creates new logger that has current logger as parent with default
 // options and starts it so it is ready for message processing.
-func (l *Logger) SubLogger() *Logger {
-	newLogger := createLogger(LoggerOptions{})
-	l.addChild(newLogger, false)
+func (l *Logger) SubLogger(name string) *Logger {
+	newLogger := createLogger(name, LoggerOptions{})
+	l.addChild(newLogger)
 	return newLogger
 }
 
 // SubLoggerOptions creates new logger that has current logger as parent with
 // provided options and starts it so it is ready for message processing.
-func (l *Logger) SubLoggerOptions(options LoggerOptions) *Logger {
-	newLogger := createLogger(options)
-	l.addChild(newLogger, options.PreventPropagation)
+func (l *Logger) SubLoggerOptions(name string, options LoggerOptions) *Logger {
+	newLogger := createLogger(name, options)
+	l.addChild(newLogger)
 	return newLogger
 }
 
-func (l *Logger) addChild(child *Logger, preventPropagation bool) {
+// GetLogger returns logger with provided name (creating it if needed).
+// Name is dot-separated string with parent logger names and this function
+// will create all intermediate loggers with default options.
+func GetLogger(name string) *Logger {
+	current := rootLogger
+	for _, part := range strings.Split(name, ".") {
+		current.relationship.RLock()
+		child, ok := current.relationship.children[part]
+		current.relationship.RUnlock()
+		if ok {
+			current = child
+		} else {
+			current = current.SubLogger(part)
+		}
+	}
+	return current
+}
+
+// GetLoggerOptions returns logger with provided name (creating it if needed).
+// Name is dot-separated string with parent loggers and this function will
+// create all intermediate loggers with default options. Provided options will
+// be applied only to last logger in chain. If all loggers in chain already
+// exist, no new loggers will be creates and provided options will be discarded.
+// If options different then default are needed for intermediate loggers,
+// create them first with appropriate options.
+func GetLoggerOptions(name string, options LoggerOptions) *Logger {
+	current := rootLogger
+	parts := strings.Split(name, ".")
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+		current.relationship.RLock()
+		child, ok := current.relationship.children[part]
+		current.relationship.RUnlock()
+		if ok {
+			current = child
+		} else {
+			if i == len(parts) - 1 {
+				current = current.SubLoggerOptions(part, options)
+			} else {
+				current = current.SubLogger(part)
+			}
+		}
+	}
+	return current
+}
+
+func (l *Logger) addChild(child *Logger) {
 	l.relationship.Lock()
-	l.relationship.children = append(l.relationship.children, child)
+	//	l.relationship.children = append(l.relationship.children, child)
+	l.relationship.children[child.name] = child
 	l.relationship.Unlock()
 
 	child.relationship.Lock()
 	child.relationship.parent = l
-	child.relationship.preventPropagation = preventPropagation
 	child.relationship.Unlock()
 }
 
 func (l *Logger) removeChild(child *Logger) {
 	l.relationship.Lock()
 	defer l.relationship.Unlock()
-	removeIndex := -1
-	for i, ch := range l.relationship.children {
-		if child == ch {
-			removeIndex = i
-			break
-		}
-	}
-	// remove it only if we found it
-	if removeIndex > -1 {
-		copy(l.relationship.children[removeIndex:], l.relationship.children[removeIndex+1:])
-		// if we do not do this there is potential memory leak, since we are holding pointers
-		l.relationship.children[len(l.relationship.children)-1] = nil
-		l.relationship.children = l.relationship.children[:len(l.relationship.children)-1]
-	}
+	delete(l.relationship.children, child.name)
 }
 
 // SetHandler set handler to this logger to be used from now on.
@@ -200,6 +229,24 @@ func (l *Logger) Handler() Handler {
 // Level returns minimal level that this logger will process.
 func (l *Logger) Level() Level {
 	return l.level
+}
+
+// Name returns name of this logger.
+func (l *Logger) Name() string {
+	return l.name
+}
+
+// FullName returns name of this logger prefixed with name of its parent,
+// separated by ".". This happens recursively, so return value will contain
+// names of all parents.
+func (l *Logger) FullName() string {
+	if l.relationship.parent != nil {
+		parentFullName := l.relationship.parent.FullName()
+		if parentFullName != "" {
+			return l.relationship.parent.FullName() + "." + l.name
+		}
+	}
+	return l.name
 }
 
 // handle is log record processor which takes records from chan and invokes all handlers.
@@ -267,7 +314,7 @@ func (l *Logger) processRecords() {
 }
 
 // log creates record suitable for processing and sends it to messages chan.
-func (l *Logger) log(record *Record) {
+func (l *Logger) log(record Record) {
 	l.state.RLock()
 	defer l.state.RUnlock()
 	if l.state.val == loggerStopped || !l.IsEnabledFor(record.Level) {
@@ -389,17 +436,18 @@ func (l *Logger) Log(level Level, message string, pairs ...string) {
 
 	// make sure that number of items in data is even
 	if len(pairs)%2 != 0 {
-		pairs = append(pairs, "")
+		pairs = append(pairs, []string{"", "error", "missing key"}...)
 	}
 	for i := 0; i < len(pairs); i += 2 {
 		d[pairs[i]] = pairs[i+1]
 	}
 
-	r := &Record{
+	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
 		Message: message,
 		Context: d,
+		Logger:  l,
 	}
 	l.log(r)
 }
@@ -411,11 +459,12 @@ func (l *Logger) LogCtx(level Level, message string, data Ctx) {
 		return
 	}
 
-	r := &Record{
+	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
 		Message: message,
 		Context: data,
+		Logger:  l,
 	}
 	l.log(r)
 }

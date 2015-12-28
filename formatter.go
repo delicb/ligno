@@ -11,14 +11,14 @@ import (
 
 // Formatter is interface for converting log record to string representation.
 type Formatter interface {
-	Format(record *Record) []byte
+	Format(record Record) []byte
 }
 
 // FormatterFunc is function type that implements Formatter interface.
-type FormatterFunc func (*Record) []byte
+type FormatterFunc func (Record) []byte
 
 // Format is implementation of Formatter interface. It just calls function.
-func (ff FormatterFunc) Format(record *Record) []byte {
+func (ff FormatterFunc) Format(record Record) []byte {
 	return ff(record)
 }
 
@@ -28,13 +28,14 @@ const DefaultTimeFormat = "2006-01-02 15:05:06.0000"
 // SimpleFormat returns formatter that formats record with bare minimum of information.
 // Intention of this formatter is to simulate standard library formatter.
 func SimpleFormat() Formatter {
-	return FormatterFunc(func(record *Record) []byte {
+	return FormatterFunc(func(record Record) []byte {
 		buff := buffPool.Get()
 		defer buffPool.Put(buff)
 		buff.WriteString(record.Time.Format(DefaultTimeFormat))
-		buff.WriteString(" ")
+		buff.WriteRune(' ')
 		buff.WriteString(record.Message)
-		buff.WriteString("\n")
+		buff.WriteRune(' ')
+		buff.WriteRune('\n')
 		return buff.Bytes()
 	})
 }
@@ -43,11 +44,10 @@ func SimpleFormat() Formatter {
 // reading in terminal, but that are a bit richer then SimpleFormat (this one
 // includes context keys)
 func TerminalFormat() Formatter {
-	return FormatterFunc(func(record *Record) []byte {
+	return FormatterFunc(func(record Record) []byte {
 		time := record.Time.Format(DefaultTimeFormat)
 		buff := buffPool.Get()
 		defer buffPool.Put(buff)
-
 		buff.WriteString(time)
 		buff.WriteRune(' ')
 		levelName := record.Level.String()
@@ -102,7 +102,7 @@ func needsQuote(r rune) bool {
 
 // JSONFormat is simple formatter that only marshals log record to json.
 func JSONFormat(pretty bool) Formatter {
-	return FormatterFunc(func(record *Record) []byte {
+	return FormatterFunc(func(record Record) []byte {
 		var marshaled []byte
 		var err error
 		if pretty {
