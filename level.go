@@ -40,19 +40,6 @@ func init() {
 	AddLevel("CRITICAL", CRITICAL)
 }
 
-func levelMaxLength() int {
-	maxLength := 0
-	mu.RLock()
-	defer mu.RUnlock()
-	for name := range name2Level {
-		nameLength := len(name)
-		if nameLength > maxLength {
-			maxLength = nameLength
-		}
-	}
-	return maxLength
-}
-
 // getLevelName returns name of provided level.
 // If provided level does not exist, empty string is returned.
 func getLevelName(level Level) (name string) {
