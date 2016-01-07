@@ -1,18 +1,18 @@
 package main
 
-
 import (
-	"github.com/delicb/ligno"
 	"os"
+
+	"github.com/delicb/ligno"
 )
 
 func main() {
 	// Create new logger with some context and handlers.
 	l := ligno.GetLoggerOptions("myLogger", ligno.LoggerOptions{
-		Context: ligno.Ctx{"always": "present"},
-		Handler: ligno.StreamHandler(os.Stdout, ligno.JSONFormat(true)),
-		Level: ligno.INFO,
-		BufferSize: 256,
+		Context:            ligno.Ctx{"always": "present"},
+		Handler:            ligno.StreamHandler(os.Stdout, ligno.JSONFormat(true)),
+		Level:              ligno.INFO,
+		BufferSize:         256,
 		PreventPropagation: true,
 	})
 
