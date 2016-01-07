@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"fmt"
 )
 
 // root logger is parent of all loggers and it always exists.
@@ -428,26 +429,27 @@ func (l *Logger) WaitTimeout(t time.Duration) (finished bool) {
 //   l.Log(INFO, "User logged in", "user_id", user_id, "platform", PLATFORM_NAME)
 // will be translated into log record with following keys:
 //  {LEVEL: INFO", EVENT: "User logged in", "user_id": user_id, "platform": PLATFORM_NAME}
-func (l *Logger) Log(level Level, message string, pairs ...string) {
+func (l *Logger) Log(level Level, message string, pairs ...interface{}) {
 	// if level is not sufficient, do not proceed to avoid unneeded allocations
 	if !l.IsEnabledFor(level) {
 		return
 	}
-	var d = make(Ctx)
+	var ctx = make(Ctx)
 
 	// make sure that number of items in data is even
 	if len(pairs)%2 != 0 {
-		pairs = append(pairs, []string{"", "error", "missing key"}...)
+		pairs = append(pairs, []interface{}{nil, "error", "missing key"}...)
 	}
 	for i := 0; i < len(pairs); i += 2 {
-		d[pairs[i]] = pairs[i+1]
+		keyStr := fmt.Sprintf("%v", pairs[i])
+		ctx[keyStr] = pairs[i+1]
 	}
 
 	r := Record{
 		Time:    time.Now().UTC(),
 		Level:   level,
 		Message: message,
-		Context: d,
+		Context: ctx,
 		Logger:  l,
 	}
 	l.log(r)
@@ -472,7 +474,7 @@ func (l *Logger) LogCtx(level Level, message string, data Ctx) {
 
 // Debug creates log record and queues it for processing with DEBUG level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Debug(message string, pairs ...string) {
+func (l *Logger) Debug(message string, pairs ...interface{}) {
 	l.Log(DEBUG, message, pairs...)
 }
 
@@ -483,7 +485,7 @@ func (l *Logger) DebugCtx(message string, ctx Ctx) {
 
 // Info creates log record and queues it for processing with INFO level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Info(message string, pairs ...string) {
+func (l *Logger) Info(message string, pairs ...interface{}) {
 	l.Log(INFO, message, pairs...)
 }
 
@@ -494,7 +496,7 @@ func (l *Logger) InfoCtx(message string, ctx Ctx) {
 
 // Warning creates log record and queues it for processing with WARNING level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Warning(message string, pairs ...string) {
+func (l *Logger) Warning(message string, pairs ...interface{}) {
 	l.Log(WARNING, message, pairs...)
 }
 
@@ -505,7 +507,7 @@ func (l *Logger) WarningCtx(message string, ctx Ctx) {
 
 // Error creates log record and queues it for processing with ERROR level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Error(message string, pairs ...string) {
+func (l *Logger) Error(message string, pairs ...interface{}) {
 	l.Log(ERROR, message, pairs...)
 }
 
@@ -516,7 +518,7 @@ func (l *Logger) ErrorCtx(message string, ctx Ctx) {
 
 // Critical creates log record and queues it for processing with CRITICAL level.
 // Additional parameters have same semantics as in Log method.
-func (l *Logger) Critical(message string, pairs ...string) {
+func (l *Logger) Critical(message string, pairs ...interface{}) {
 	l.Log(CRITICAL, message, pairs...)
 }
 
