@@ -57,11 +57,49 @@ func main() {
 
 Output would look like:
 ```
-2015-12-18 00:37:15.1895  INFO       Some event occurred. [always="present" key="value" key2="value2" ]
+{
+    "time": "2016-02-09T20:58:39.313122319Z",
+    "level": "INFO",
+    "message": "Some event occurred.",
+    "context": {
+        "always": "present",
+        "key": "value",
+        "key2": "value2"
+    }
+}
 ```
 
 Setup of new logger still has some boilerplate code, I intend to spend some time on
 figuring out better API for it.
+
+## Benchmarks
+I have not used builtin golang benchmarks to measure performance yet, but I did hack up small script
+that compares ligno with bunch of other logging frameworks, including golang stdlib. With every logger 
+some number of messages are logged to stdout (1024 by default) and two numbers are produced for every logger: 
+average time and total time. Average time is time spent in logging library (overhead that application using
+logger sees) for one message. Total is time that logging library took to process all messages. Since ligno is
+async, this is not simply *average* * *number* of messages, it will be higher, so I included it to compare
+overall performance with other logging libraries. For me, time spent in logging library for single message is
+much more important then total time spent processing log messages (since that overhead will come at the end of
+program execution), but I think that it is only fair to include both.
+
+Benchmarking script can be found in benchmark folder, but this is example of one output:
+```
+Logging 1024 messages.
+Ligno           average time:      697ns, total time:     49.149567ms
+resenje-logging average time:      824ns, total time:     78.261047ms
+stdlib          average time:   39.565µs, total time:     40.569742ms
+gommon          average time:   42.024µs, total time:     43.096594ms
+seelog          average time:   63.808µs, total time:     66.869716ms
+Log15           average time:   65.806µs, total time:     67.447484ms
+logrus          average time:   67.856µs, total time:     69.542356ms
+logxi           average time:   76.046µs, total time:     77.920668ms
+Total execution time: 78.463182ms
+```
+
+## Credits
+I was reading bunch of articles and source code for existing logging libraries so if you
+recognize some pattern from somewhere else, it is quite possible that I have seen it there.
 
 ## Note
 At this point, ligno is just an idea that has been written down. But instead
@@ -70,7 +108,7 @@ changes and do not use it in production just yet - I am not (but I intend to).
 
 ## TODO
 This is only just a skeleton, much is left.
-- Implementation of other handlers (only stdout handler is available).
+- Implementation of other handlers.
 - Implementation of other formatters, like feature rich JSON formatter, YAML formatter, etc...
 - Integration with other frameworks (logging, web or other).
 - Documentation.
