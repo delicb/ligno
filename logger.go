@@ -1,13 +1,13 @@
 package ligno
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"fmt"
 )
 
 // root logger is parent of all loggers and it always exists.
@@ -539,22 +539,22 @@ func (l *Logger) IsDebug() bool {
 
 // IsInfo returns true if logger will process messages in INFO level
 func (l *Logger) IsInfo() bool {
-	return l.IsEnabledFor(DEBUG)
+	return l.IsEnabledFor(INFO)
 }
 
 // IsWarning returns true if logger will process messages in WARNING level
 func (l *Logger) IsWarning() bool {
-	return l.IsEnabledFor(DEBUG)
+	return l.IsEnabledFor(WARNING)
 }
 
 // IsError returns true if logger will process messages in ERROR level
 func (l *Logger) IsError() bool {
-	return l.IsEnabledFor(DEBUG)
+	return l.IsEnabledFor(ERROR)
 }
 
 // IsCritical returns true if logger will process messages in Critical level
 func (l *Logger) IsCritical() bool {
-	return l.IsEnabledFor(DEBUG)
+	return l.IsEnabledFor(CRITICAL)
 }
 
 // IsLevel return true if logger will process messages in provided level.
