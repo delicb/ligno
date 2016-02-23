@@ -7,6 +7,7 @@ import (
 	"sort"
 	"unicode"
 	"strings"
+	"strconv"
 )
 
 // Formatter is interface for converting log record to string representation.
@@ -35,6 +36,13 @@ func SimpleFormat() Formatter {
 		buff.WriteRune(' ')
 		buff.WriteString(record.Message)
 		buff.WriteRune(' ')
+		if record.File != "" && record.Line > 0 {
+			buff.WriteRune('[')
+			buff.WriteString(record.File)
+			buff.WriteRune(':')
+			buff.WriteString(strconv.Itoa(record.Line))
+			buff.WriteRune(']')
+		}
 		buff.WriteRune('\n')
 		return buff.Bytes()
 	})

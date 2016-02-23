@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-
 // stdLogger is interface that describes logger from standard library.
 // It is defined here to trigger build time errors if ligno logger does not
 // implement it.
@@ -35,37 +34,37 @@ var _ stdLogger = GetLogger("_")
 
 // Printf formats message according to stdlib rules and logs it in INFO level.
 func (l *Logger) Printf(format string, v ...interface{}) {
-	l.Log(INFO, fmt.Sprintf(format, v...))
+	l.Log(2, INFO, fmt.Sprintf(format, v...))
 }
 
 // Print formats message according to stdlib rules and logs it in INFO level.
 func (l *Logger) Print(v ...interface{}) {
-	l.Log(INFO, fmt.Sprint(v...))
+	l.Log(2, INFO, fmt.Sprint(v...))
 }
 
 // Printfln formats message according to stdlib rules and logs it in INFO level.
 func (l *Logger) Println(v ...interface{}) {
-	l.Log(INFO, fmt.Sprintln(v...))
+	l.Log(2, INFO, fmt.Sprintln(v...))
 }
 
 // Fatal formats message according to stdlib rules, logs it in CRITICAL level
 // and exists application.
 func (l *Logger) Fatal(v ...interface{}) {
-	l.Log(CRITICAL, fmt.Sprint(v...))
+	l.Log(2, CRITICAL, fmt.Sprint(v...))
 	os.Exit(1)
 }
 
 // Fatalf formats message according to stdlib rules, logs it in CRITICAL level
 // and exists application.
 func (l *Logger) Fatalf(format string, v ...interface{}) {
-	l.Log(CRITICAL, fmt.Sprintf(format, v...))
+	l.Log(2, CRITICAL, fmt.Sprintf(format, v...))
 	os.Exit(1)
 }
 
 // Fatalln formats message according to stdlib rules, logs it in CRITICAL level
 // and exists application.
 func (l *Logger) Fatalln(v ...interface{}) {
-	l.Log(CRITICAL, fmt.Sprintln(v...))
+	l.Log(2, CRITICAL, fmt.Sprintln(v...))
 	os.Exit(1)
 }
 
@@ -73,7 +72,7 @@ func (l *Logger) Fatalln(v ...interface{}) {
 // and panics.
 func (l *Logger) Panic(v ...interface{}) {
 	s := fmt.Sprint(v...)
-	l.Log(CRITICAL, s)
+	l.Log(2, CRITICAL, s)
 	panic(s)
 }
 
@@ -81,7 +80,7 @@ func (l *Logger) Panic(v ...interface{}) {
 // and panics.
 func (l *Logger) Panicf(format string, v ...interface{}) {
 	s := fmt.Sprintf(format, v...)
-	l.Log(CRITICAL, s)
+	l.Log(2, CRITICAL, s)
 	panic(s)
 }
 
@@ -89,7 +88,7 @@ func (l *Logger) Panicf(format string, v ...interface{}) {
 // and panics.
 func (l *Logger) Panicln(v ...interface{}) {
 	s := fmt.Sprintln(v...)
-	l.Log(CRITICAL, s)
+	l.Log(2, CRITICAL, s)
 	panic(s)
 }
 
@@ -173,6 +172,9 @@ type Logger struct {
 	}
 	// level is lowest level that this logger will process
 	level Level
+	// Flag that indicates that file and line of place where logging took place
+	// should be kept.
+	includeFileAndLine bool
 }
 
 // LoggerOptions is container for configuration options for logger instances.
@@ -189,6 +191,10 @@ type LoggerOptions struct {
 	// PreventPropagation is flag that indicates if records should be passed
 	// to parent logger for processing.
 	PreventPropagation bool
+	// Flag that indicates that file and line of place where logging took place
+	// should be kept. Note that this is expensive, so use with care. If this
+	// information will be shown depends on formatter.
+	IncludeFileAndLine bool
 }
 
 // createLogger creates new instance of logger, initializes all values based
@@ -203,13 +209,14 @@ func createLogger(name string, options LoggerOptions) *Logger {
 		buffSize = 1024
 	}
 	l := &Logger{
-		name:           name,
-		context:        options.Context,
-		records:        make(chan Record, buffSize),
-		rawRecords:     make(chan Record, buffSize),
-		notifyFinished: make(chan chan struct{}),
-		handler:        rh,
-		level:          options.Level,
+		name:               name,
+		context:            options.Context,
+		records:            make(chan Record, buffSize),
+		rawRecords:         make(chan Record, buffSize),
+		notifyFinished:     make(chan chan struct{}),
+		handler:            rh,
+		level:              options.Level,
+		includeFileAndLine: options.IncludeFileAndLine,
 	}
 	// no need to lock access to state here since we just created logger
 	// and nobody can use it anywhere else at the moment.
@@ -385,19 +392,34 @@ func (l *Logger) processRecords() {
 
 			l.records <- record
 			if !l.relationship.preventPropagation && l.relationship.parent != nil {
-				l.relationship.parent.log(record)
+				l.relationship.parent.log(-1, record)
 			}
 		}
 	}
 }
 
 // log creates record suitable for processing and sends it to messages chan.
-func (l *Logger) log(record Record) {
+func (l *Logger) log(calldepth int, record Record) {
 	l.state.RLock()
 	defer l.state.RUnlock()
 	if l.state.val == loggerStopped || !l.IsEnabledFor(record.Level) {
 		return
 	}
+
+	var file string
+	var line int
+	var gotCaller bool
+	if l.includeFileAndLine && calldepth > 0 {
+		_, file, line, gotCaller = runtime.Caller(calldepth)
+		if !gotCaller {
+			file = "???"
+			line = -1
+		}
+	}
+
+	record.File = file
+	record.Line = line
+
 	atomic.AddInt32(&l.toProcess, 1)
 	l.rawRecords <- record
 }
@@ -512,7 +534,7 @@ func (l *Logger) WaitTimeout(t time.Duration) (finished bool) {
 //   l.Log(INFO, "User logged in", "user_id", user_id, "platform", PLATFORM_NAME)
 // will be translated into log record with following keys:
 //  {LEVEL: INFO", EVENT: "User logged in", "user_id": user_id, "platform": PLATFORM_NAME}
-func (l *Logger) Log(level Level, message string, pairs ...interface{}) {
+func (l *Logger) Log(calldepth int, level Level, message string, pairs ...interface{}) {
 	// if level is not sufficient, do not proceed to avoid unneeded allocations
 	if !l.IsEnabledFor(level) {
 		return
@@ -535,11 +557,11 @@ func (l *Logger) Log(level Level, message string, pairs ...interface{}) {
 		Context: ctx,
 		Logger:  l,
 	}
-	l.log(r)
+	l.log(calldepth+1, r)
 }
 
 // LogCtx adds provided message in specified level.
-func (l *Logger) LogCtx(level Level, message string, data Ctx) {
+func (l *Logger) LogCtx(calldepth int, level Level, message string, data Ctx) {
 	// if level is not sufficient, do not proceed to avoid unneeded allocations
 	if !l.IsEnabledFor(level) {
 		return
@@ -552,62 +574,62 @@ func (l *Logger) LogCtx(level Level, message string, data Ctx) {
 		Context: data,
 		Logger:  l,
 	}
-	l.log(r)
+	l.log(calldepth+1, r)
 }
 
 // Debug creates log record and queues it for processing with DEBUG level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Debug(message string, pairs ...interface{}) {
-	l.Log(DEBUG, message, pairs...)
+	l.Log(2, DEBUG, message, pairs...)
 }
 
 // DebugCtx logs message in DEBUG level with provided context.
 func (l *Logger) DebugCtx(message string, ctx Ctx) {
-	l.LogCtx(DEBUG, message, ctx)
+	l.LogCtx(2, DEBUG, message, ctx)
 }
 
 // Info creates log record and queues it for processing with INFO level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Info(message string, pairs ...interface{}) {
-	l.Log(INFO, message, pairs...)
+	l.Log(2, INFO, message, pairs...)
 }
 
 // InfoCtx logs message in INFO level with provided context.
 func (l *Logger) InfoCtx(message string, ctx Ctx) {
-	l.LogCtx(INFO, message, ctx)
+	l.LogCtx(2, INFO, message, ctx)
 }
 
 // Warning creates log record and queues it for processing with WARNING level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Warning(message string, pairs ...interface{}) {
-	l.Log(WARNING, message, pairs...)
+	l.Log(2, WARNING, message, pairs...)
 }
 
 // WarningCtx logs message in WARNING level with provided context.
 func (l *Logger) WarningCtx(message string, ctx Ctx) {
-	l.LogCtx(WARNING, message, ctx)
+	l.LogCtx(2, WARNING, message, ctx)
 }
 
 // Error creates log record and queues it for processing with ERROR level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Error(message string, pairs ...interface{}) {
-	l.Log(ERROR, message, pairs...)
+	l.Log(2, ERROR, message, pairs...)
 }
 
 // ErrorCtx logs message in ERROR level with provided context.
 func (l *Logger) ErrorCtx(message string, ctx Ctx) {
-	l.LogCtx(ERROR, message, ctx)
+	l.LogCtx(2, ERROR, message, ctx)
 }
 
 // Critical creates log record and queues it for processing with CRITICAL level.
 // Additional parameters have same semantics as in Log method.
 func (l *Logger) Critical(message string, pairs ...interface{}) {
-	l.Log(CRITICAL, message, pairs...)
+	l.Log(2, CRITICAL, message, pairs...)
 }
 
 // CriticalCtx logs message in CRITICAL level with provided context.
 func (l *Logger) CriticalCtx(message string, ctx Ctx) {
-	l.LogCtx(CRITICAL, message, ctx)
+	l.LogCtx(2, CRITICAL, message, ctx)
 }
 
 // IsEnabledFor returns true if logger will process records with provided level.

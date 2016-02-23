@@ -24,4 +24,6 @@ type Record struct {
 	Message string    `json:"message"`
 	Context Ctx       `json:"context"`
 	Logger  *Logger   `json:"-"`
+	File    string    `json:"file"`
+	Line    int       `json:"line"`
 }
