@@ -10,6 +10,89 @@ import (
 	"time"
 )
 
+
+// stdLogger is interface that describes logger from standard library.
+// It is defined here to trigger build time errors if ligno logger does not
+// implement it.
+// Not all methods from stdlib logger are set here (like Flags, Prefix and
+// Output manipulation) because they are not straight forward do implement
+// with ligno, but they might be added later.
+type stdLogger interface {
+	Printf(format string, v ...interface{})
+	Print(v ...interface{})
+	Println(v ...interface{})
+	Fatal(v ...interface{})
+	Fatalf(format string, v ...interface{})
+	Fatalln(v ...interface{})
+	Panic(v ...interface{})
+	Panicf(format string, v ...interface{})
+	Panicln(v ...interface{})
+}
+
+// assign instance of logger to stdLogger interface to trigger compile time
+// error if logger does not implement interface
+var _ stdLogger = GetLogger("_")
+
+// Printf formats message according to stdlib rules and logs it in INFO level.
+func (l *Logger) Printf(format string, v ...interface{}) {
+	l.Log(INFO, fmt.Sprintf(format, v...))
+}
+
+// Print formats message according to stdlib rules and logs it in INFO level.
+func (l *Logger) Print(v ...interface{}) {
+	l.Log(INFO, fmt.Sprint(v...))
+}
+
+// Printfln formats message according to stdlib rules and logs it in INFO level.
+func (l *Logger) Println(v ...interface{}) {
+	l.Log(INFO, fmt.Sprintln(v...))
+}
+
+// Fatal formats message according to stdlib rules, logs it in CRITICAL level
+// and exists application.
+func (l *Logger) Fatal(v ...interface{}) {
+	l.Log(CRITICAL, fmt.Sprint(v...))
+	os.Exit(1)
+}
+
+// Fatalf formats message according to stdlib rules, logs it in CRITICAL level
+// and exists application.
+func (l *Logger) Fatalf(format string, v ...interface{}) {
+	l.Log(CRITICAL, fmt.Sprintf(format, v...))
+	os.Exit(1)
+}
+
+// Fatalln formats message according to stdlib rules, logs it in CRITICAL level
+// and exists application.
+func (l *Logger) Fatalln(v ...interface{}) {
+	l.Log(CRITICAL, fmt.Sprintln(v...))
+	os.Exit(1)
+}
+
+// Panic formats message according to stdlib rules, logs it in CRITICAL level
+// and panics.
+func (l *Logger) Panic(v ...interface{}) {
+	s := fmt.Sprint(v...)
+	l.Log(CRITICAL, s)
+	panic(s)
+}
+
+// Panicf formats message according to stdlib rules, logs it in CRITICAL level
+// and panics.
+func (l *Logger) Panicf(format string, v ...interface{}) {
+	s := fmt.Sprintf(format, v...)
+	l.Log(CRITICAL, s)
+	panic(s)
+}
+
+// Panicln formats message according to stdlib rules, logs it in CRITICAL level
+// and panics.
+func (l *Logger) Panicln(v ...interface{}) {
+	s := fmt.Sprintln(v...)
+	l.Log(CRITICAL, s)
+	panic(s)
+}
+
 // root logger is parent of all loggers and it always exists.
 var rootLogger = createLogger("", LoggerOptions{
 	Context:    nil,
