@@ -2,6 +2,7 @@ package ligno
 
 import (
 	"io"
+	"log/syslog"
 	"os"
 	"sync"
 )
@@ -52,7 +53,7 @@ func FilterHandler(predicate Predicate, handler Handler) Handler {
 // FilterLevelHandler is FilterHandler with default predicate function that filters
 // all records below provided level.
 func FilterLevelHandler(level Level, handler Handler) Handler {
-	levelPredicate := Predicate(func (record Record) bool {
+	levelPredicate := Predicate(func(record Record) bool {
 		return record.Level >= level
 	})
 	return FilterHandler(levelPredicate, handler)
@@ -90,24 +91,24 @@ func CombiningHandler(handlers ...Handler) Handler {
 }
 
 // FileHandler writes log records to file with provided name.
-func FileHandler(fileName string, formatter Formatter) Handler{
+func FileHandler(fileName string, formatter Formatter) Handler {
 	return &fileHandler{
-		fileName: fileName,
+		fileName:  fileName,
 		formatter: formatter,
 	}
 }
 
 // fileHandler writes log messages to file with provided name.
 type fileHandler struct {
-	fileName string
+	fileName  string
 	formatter Formatter
-	f *os.File
+	f         *os.File
 }
 
 // Handle writes record to file.
 func (fh *fileHandler) Handle(record Record) error {
 	if fh.f == nil {
-		f, err := os.OpenFile(fh.fileName, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
+		f, err := os.OpenFile(fh.fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -132,16 +133,16 @@ func NullHandler() Handler {
 
 // InspectHandler is handler that is able to restore logged message and
 // return them for inspection.
-type InspectHandler interface{
+type InspectHandler interface {
 	Handler
 	Messages() []string
 }
 
 // MemoryHandler stores all records in memory, to be fetched and inspected later.
 type memoryHandler struct {
-	buffer [][]byte
+	buffer    [][]byte
 	formatter Formatter
-	mu sync.Mutex
+	mu        sync.Mutex
 }
 
 // Handle stores formatted record in memory.
@@ -166,7 +167,58 @@ func (mh *memoryHandler) Messages() []string {
 // MemoryHandler returns handler instance that saves all message to memory.
 func MemoryHandler(formatter Formatter) InspectHandler {
 	return &memoryHandler{
-		buffer: make([][]byte, 0),
+		buffer:    make([][]byte, 0),
 		formatter: formatter,
 	}
+}
+
+// syslogHandler sends all messages to local syslog server.
+type syslogHandler struct {
+	Formatter Formatter
+	Tag       string
+	Priority  syslog.Priority
+	writer    *syslog.Writer
+}
+
+// SyslogHandler creates new syslog handler with provided config variables.
+func SyslogHandler(formatter Formatter, tag string, priority syslog.Priority) Handler {
+	writer, err := syslog.New(syslog.LOG_DEBUG, tag)
+	if err != nil {
+		panic(err)
+	}
+	return &syslogHandler{
+		Formatter: formatter,
+		Tag:       tag,
+		Priority:  priority,
+		writer:    writer,
+	}
+}
+
+// Handle passes all messages to syslog server. Message priorities are
+// translated to syslog compatible priorities.
+func (sh *syslogHandler) Handle(record Record) error {
+
+	msg := string(sh.Formatter.Format(record))
+	switch record.Level {
+	case NOTSET:
+		return sh.writer.Info(msg)
+	case DEBUG:
+		return sh.writer.Debug(msg)
+	case INFO:
+		return sh.writer.Info(msg)
+	case WARNING:
+		return sh.writer.Warning(msg)
+	case ERROR:
+		return sh.writer.Err(msg)
+	case CRITICAL:
+		return sh.writer.Crit(msg)
+	default:
+		return sh.writer.Info(msg)
+	}
+	return nil
+}
+
+// Close closes connection with syslog server.
+func (sh *syslogHandler) Close() {
+	sh.writer.Close()
 }
