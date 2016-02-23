@@ -1,5 +1,10 @@
 package ligno
 
+import (
+	"fmt"
+	"os"
+)
+
 // Log creates record and queues it for processing.
 // Required parameters are level for record and event that occurred. Any
 // additional parameters will be transformed to key-value pairs for record
@@ -73,6 +78,65 @@ func CriticalCtx(message string, ctx Ctx) {
 	rootLogger.LogCtx(2, CRITICAL, message, ctx)
 }
 
+// Printf formats message according to stdlib rules and logs it in INFO level.
+func Printf(format string, v ...interface{}) {
+	rootLogger.Log(2, INFO, fmt.Sprintf(format, v...))
+}
+
+// Print formats message according to stdlib rules and logs it in INFO level.
+func Print(v ...interface{}) {
+	rootLogger.Log(2, INFO, fmt.Sprint(v...))
+}
+
+// Printfln formats message according to stdlib rules and logs it in INFO level.
+func Println(v ...interface{}) {
+	rootLogger.Log(2, INFO, fmt.Sprintln(v...))
+}
+
+// Fatal formats message according to stdlib rules, logs it in CRITICAL level
+// and exists application.
+func Fatal(v ...interface{}) {
+	rootLogger.Log(2, CRITICAL, fmt.Sprint(v...))
+	os.Exit(1)
+}
+
+// Fatalf formats message according to stdlib rules, logs it in CRITICAL level
+// and exists application.
+func Fatalf(format string, v ...interface{}) {
+	rootLogger.Log(2, CRITICAL, fmt.Sprintf(format, v...))
+	os.Exit(1)
+}
+
+// Fatalln formats message according to stdlib rules, logs it in CRITICAL level
+// and exists application.
+func Fatalln(v ...interface{}) {
+	rootLogger.Log(2, CRITICAL, fmt.Sprintln(v...))
+	os.Exit(1)
+}
+
+// Panic formats message according to stdlib rules, logs it in CRITICAL level
+// and panics.
+func Panic(v ...interface{}) {
+	s := fmt.Sprint(v...)
+	rootLogger.Log(2, CRITICAL, s)
+	panic(s)
+}
+
+// Panicf formats message according to stdlib rules, logs it in CRITICAL level
+// and panics.
+func Panicf(format string, v ...interface{}) {
+	s := fmt.Sprintf(format, v...)
+	rootLogger.Log(2, CRITICAL, s)
+	panic(s)
+}
+
+// Panicln formats message according to stdlib rules, logs it in CRITICAL level
+// and panics.
+func Panicln(v ...interface{}) {
+	s := fmt.Sprintln(v...)
+	rootLogger.Log(2, CRITICAL, s)
+	panic(s)
+}
 // SetHandler sets new handler for default logger.
 func SetHandler(handler Handler) {
 	rootLogger.SetHandler(handler)
