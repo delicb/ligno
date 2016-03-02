@@ -111,6 +111,13 @@ func needsQuote(r rune) bool {
 // JSONFormat is simple formatter that only marshals log record to json.
 func JSONFormat(pretty bool) Formatter {
 	return FormatterFunc(func(record Record) []byte {
+		// since errors are not JSON serializable, make sure that all errors
+		// are converted to strings
+		for k, v := range record.Context {
+			record.Context[k] = fmt.Sprintf("%+v", v)
+		}
+
+		// serialize
 		var marshaled []byte
 		var err error
 		if pretty {

@@ -542,8 +542,19 @@ func (l *Logger) Log(calldepth int, level Level, message string, pairs ...interf
 	var ctx = make(Ctx)
 
 	// make sure that number of items in data is even
-	if len(pairs)%2 != 0 {
-		pairs = append(pairs, []interface{}{nil, "error", "missing key"}...)
+	pairsNo := len(pairs)
+	if pairsNo%2 != 0 && pairsNo > 0 {
+		// If there is no even number of items provided - add dummy values and
+		// indicate that there was a problem.
+		// However, if last provided unpaired item is instance of error,
+		// add it with key "err" without reporting problems. This is useful
+		// for logging stuff in format ligno.Error("Description", err)
+		last := pairs[pairsNo-1]
+		if _, ok := last.(error); ok {
+			pairs = append(pairs[:pairsNo-1], "err", last)
+		} else {
+			pairs = append(pairs, []interface{}{nil, "error", "missing key"}...)
+		}
 	}
 	for i := 0; i < len(pairs); i += 2 {
 		keyStr := fmt.Sprintf("%v", pairs[i])
