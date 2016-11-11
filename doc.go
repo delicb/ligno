@@ -9,4 +9,4 @@
 // map holding key-value pairs. That's it. Because of this, records can be
 // formatted to any structured format (JSON, YAML, key=value) or to traditional
 // formats that we are used to seeing in log files.
-package ligno
+package ligno // import "go.delic.rs/ligno"

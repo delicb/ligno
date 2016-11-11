@@ -11,6 +11,9 @@ map holding key-value pairs. That's it. Because of this, records can be
 formatted to any structured format (JSON, YAML, key=value) or to traditional
 formats that we are used to seeing in log files.
 
+## Install
+Run `go get go.delic.rs/ligno` from command line.
+
 ## Example
 Just a quick example of how usage might look like.
 ```go
