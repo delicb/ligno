@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"unicode"
-	"strings"
 	"strconv"
+	"strings"
+	"unicode"
 )
 
 // Formatter is interface for converting log record to string representation.
@@ -16,7 +16,7 @@ type Formatter interface {
 }
 
 // FormatterFunc is function type that implements Formatter interface.
-type FormatterFunc func (Record) []byte
+type FormatterFunc func(Record) []byte
 
 // Format is implementation of Formatter interface. It just calls function.
 func (ff FormatterFunc) Format(record Record) []byte {
@@ -48,22 +48,35 @@ func SimpleFormat() Formatter {
 	})
 }
 
-// TerminalFormat returns formatter that produces records formatted for easy
-// reading in terminal, but that are a bit richer then SimpleFormat (this one
-// includes context keys)
+// TerminalFormat returns ThemeTerminalFormat with default theme set.
 func TerminalFormat() Formatter {
+	return ThemedTerminalFormat(DefaultTheme)
+}
+
+// NoColorTerminalFormat returns ThemeTerminalFormat with theme that does
+// not colorize anything.
+func NoColorTerminalFormat() Formatter {
+	return ThemedTerminalFormat(NoColorTheme)
+}
+
+// ThemedTerminalFormat returns formatter that produces records formatted for
+// easy reading in terminal, but that are a bit richer then SimpleFormat (this
+// one includes context keys)
+func ThemedTerminalFormat(theme Theme) Formatter {
 	return FormatterFunc(func(record Record) []byte {
 		time := record.Time.Format(DefaultTimeFormat)
 		buff := buffPool.Get()
 		defer buffPool.Put(buff)
-		buff.WriteString(time)
+		buff.WriteString(theme.Time(time))
 		buff.WriteRune(' ')
 		levelName := record.Level.String()
-		buff.WriteString(levelName)
+		buff.WriteString(theme.Level(levelName))
 		padSpaces := levelNameMaxLength - len(levelName) + 2
 		buff.Write(bytes.Repeat([]byte(" "), padSpaces))
 		buff.WriteRune(' ')
-		buff.WriteString(record.Message)
+
+		colFunc := theme.Colorizer(record.Level)
+		buff.WriteString(colFunc(record.Message))
 
 		ctx := record.Context
 		keys := make([]string, 0, len(ctx))
@@ -73,28 +86,27 @@ func TerminalFormat() Formatter {
 		sort.Strings(keys)
 
 		if len(keys) > 0 {
-			buff.WriteString(" [")
+			buff.WriteString(colFunc(" ["))
 		}
 		for i := 0; i < len(keys); i++ {
 			k := keys[i]
 			keyQuote := strings.IndexFunc(k, needsQuote) >= 0 || k == ""
 			if keyQuote {
-				buff.WriteRune('"')
+				buff.WriteString(colFunc("\""))
 			}
-			buff.WriteString(k)
+			buff.WriteString(colFunc(k))
 			if keyQuote {
 				buff.WriteRune('"')
 			}
-			buff.WriteRune('=')
-			buff.WriteRune('"')
-			buff.WriteString(fmt.Sprintf("%+v", ctx[k]))
-			buff.WriteRune('"')
+			buff.WriteString(colFunc("=\""))
+			buff.WriteString(colFunc(fmt.Sprintf("%+v", ctx[k])))
+			buff.WriteString(colFunc("\""))
 			if i < len(keys)-1 {
 				buff.WriteRune(' ')
 			}
 		}
 		if len(keys) > 0 {
-			buff.WriteRune(']')
+			buff.WriteString(colFunc("]"))
 		}
 		buff.WriteRune('\n')
 		return buff.Bytes()

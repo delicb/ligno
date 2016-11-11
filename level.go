@@ -2,6 +2,7 @@ package ligno
 
 import (
 	"fmt"
+	"github.com/fatih/color"
 	"strconv"
 	"sync"
 )
@@ -26,9 +27,9 @@ var (
 	// level2Name is map from level to name of known level names.
 	level2Name = make(map[Level]string)
 	// name2level is map from name to level of known level names.
-	name2Level = make(map[string]Level)
+	name2Level         = make(map[string]Level)
 	levelNameMaxLength = 0
-	mu sync.RWMutex
+	mu                 sync.RWMutex
 )
 
 func init() {
@@ -101,3 +102,94 @@ func (l *Level) UnmarshalJSON(b []byte) error {
 	*l = level
 	return nil
 }
+
+// Theme is definition of interface needed for colorizing log message to console.
+type Theme interface {
+	Time(msg string, args ...interface{}) string
+	Level(msg string, args ...interface{}) string
+	Debug(msg string, args ...interface{}) string
+	Info(msg string, args ...interface{}) string
+	Warning(msg string, args ...interface{}) string
+	Error(msg string, args ...interface{}) string
+	Critical(msg string, args ...interface{}) string
+	Colorizer(level Level) func(msg string, args ...interface{}) string
+}
+
+type theme struct {
+	timeColor     func(str string, args ...interface{}) string
+	levelColor    func(str string, args ...interface{}) string
+	debugColor    func(str string, args ...interface{}) string
+	infoColor     func(str string, args ...interface{}) string
+	warningColor  func(str string, args ...interface{}) string
+	errorColor    func(str string, args ...interface{}) string
+	criticalColor func(str string, args ...interface{}) string
+}
+
+func (t *theme) Time(msg string, args ...interface{}) string {
+	return t.timeColor(msg, args...)
+}
+
+func (t *theme) Level(msg string, args ...interface{}) string {
+	return t.levelColor(msg, args...)
+}
+
+func (t *theme) Debug(msg string, args ...interface{}) string {
+	return t.debugColor(msg, args...)
+}
+
+func (t *theme) Info(msg string, args ...interface{}) string {
+	return t.infoColor(msg, args...)
+}
+
+func (t *theme) Warning(msg string, args ...interface{}) string {
+	return t.warningColor(msg, args...)
+}
+
+func (t *theme) Error(msg string, args ...interface{}) string {
+	return t.errorColor(msg, args...)
+}
+
+func (t *theme) Critical(msg string, args ...interface{}) string {
+	return t.criticalColor(msg, args...)
+}
+
+func (t *theme) Colorizer(level Level) func(msg string, args ...interface{}) string {
+	switch {
+	case level < INFO:
+		return t.debugColor
+	case level >= INFO && level < WARNING:
+		return t.infoColor
+	case level >= WARNING && level < ERROR:
+		return t.warningColor
+	case level >= ERROR && level < CRITICAL:
+		return t.errorColor
+	case level >= CRITICAL:
+		return t.criticalColor
+	default:
+		return t.infoColor
+	}
+}
+
+var (
+	// DefaultTheme defines theme used by default.
+	DefaultTheme = &theme{
+		timeColor:     color.New(color.FgWhite, color.Faint).SprintfFunc(),
+		levelColor:    color.New(color.FgWhite, color.Italic).SprintfFunc(),
+		debugColor:    color.New(color.FgWhite).SprintfFunc(),
+		infoColor:     color.New(color.FgHiWhite).SprintfFunc(),
+		warningColor:  color.New(color.FgYellow).SprintfFunc(),
+		errorColor:    color.New(color.FgHiRed).SprintfFunc(),
+		criticalColor: color.New(color.BgRed, color.FgHiWhite).SprintfFunc(),
+	}
+
+	// NoColorTheme defines theme that does not color any output.
+	NoColorTheme = &theme{
+		timeColor:     fmt.Sprintf,
+		levelColor:    fmt.Sprintf,
+		debugColor:    fmt.Sprintf,
+		infoColor:     fmt.Sprintf,
+		warningColor:  fmt.Sprintf,
+		errorColor:    fmt.Sprintf,
+		criticalColor: fmt.Sprintf,
+	}
+)

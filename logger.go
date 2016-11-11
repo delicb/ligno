@@ -42,7 +42,7 @@ func (l *Logger) Print(v ...interface{}) {
 	l.Log(2, INFO, fmt.Sprint(v...))
 }
 
-// Printfln formats message according to stdlib rules and logs it in INFO level.
+// Println formats message according to stdlib rules and logs it in INFO level.
 func (l *Logger) Println(v ...interface{}) {
 	l.Log(2, INFO, fmt.Sprintln(v...))
 }

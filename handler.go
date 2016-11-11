@@ -215,7 +215,6 @@ func (sh *syslogHandler) Handle(record Record) error {
 	default:
 		return sh.writer.Info(msg)
 	}
-	return nil
 }
 
 // Close closes connection with syslog server.
