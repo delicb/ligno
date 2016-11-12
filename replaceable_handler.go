@@ -1,6 +1,5 @@
 package ligno
 
-
 import (
 	"sync/atomic"
 	"unsafe"

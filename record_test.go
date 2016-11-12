@@ -1,9 +1,9 @@
 package ligno
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
-	"encoding/json"
 )
 
 func TestCreateRecordEmpty(t *testing.T) {
@@ -14,17 +14,17 @@ func TestSerializeRecordToJSON(t *testing.T) {
 	recordTime := time.Now().UTC()
 	testData := []Record{
 		Record{
-			Time: recordTime,
-			Level: INFO,
+			Time:    recordTime,
+			Level:   INFO,
 			Message: "some message",
 			Context: Ctx{"a": "b"},
-			Logger: nil,
+			Logger:  nil,
 		},
 		Record{
-			Time: recordTime,
-			Level: ERROR,
+			Time:    recordTime,
+			Level:   ERROR,
 			Context: Ctx{},
-			Logger: GetLogger(""),
+			Logger:  GetLogger(""),
 		},
 	}
 	for _, r := range testData {

@@ -12,12 +12,12 @@ import (
 
 	"sync"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/cihub/seelog"
 	"github.com/inconshreveable/log15"
 	gommon "github.com/labstack/gommon/log"
 	logxi "github.com/mgutz/logxi/v1"
 	"resenje.org/logging"
-	"github.com/Sirupsen/logrus"
 )
 
 type Measurement struct {
@@ -109,8 +109,8 @@ func main() {
 		afterFunc: func() { seelog.Flush() },
 	})
 	results = append(results, &Measurement{
-		name: "logrus",
-		logFunc: func() {logrus.Info("logrus message")},
+		name:    "logrus",
+		logFunc: func() { logrus.Info("logrus message") },
 	})
 
 	var wg sync.WaitGroup

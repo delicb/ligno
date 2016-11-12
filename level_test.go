@@ -1,4 +1,5 @@
 package ligno
+
 import "testing"
 
 func TestBuiltinLevelsRegistered(t *testing.T) {
@@ -13,12 +14,12 @@ func TestBuiltinLevelsRegistered(t *testing.T) {
 
 func TestGetBuiltinLevelName(t *testing.T) {
 	for level, name := range map[Level]string{
-		NOTSET: "NOTSET",
-		DEBUG: "DEBUG",
-		INFO: "INFO",
-		WARNING:"WARNING",
-		ERROR:"ERROR",
-		CRITICAL:"CRITICAL",
+		NOTSET:   "NOTSET",
+		DEBUG:    "DEBUG",
+		INFO:     "INFO",
+		WARNING:  "WARNING",
+		ERROR:    "ERROR",
+		CRITICAL: "CRITICAL",
 		Level(2): "",
 	} {
 		levelName := getLevelName(level)
@@ -30,12 +31,12 @@ func TestGetBuiltinLevelName(t *testing.T) {
 
 func TestBuiltinStringer(t *testing.T) {
 	for level, name := range map[Level]string{
-		NOTSET: "NOTSET",
-		DEBUG: "DEBUG",
-		INFO: "INFO",
-		WARNING:"WARNING",
-		ERROR:"ERROR",
-		CRITICAL:"CRITICAL",
+		NOTSET:   "NOTSET",
+		DEBUG:    "DEBUG",
+		INFO:     "INFO",
+		WARNING:  "WARNING",
+		ERROR:    "ERROR",
+		CRITICAL: "CRITICAL",
 		Level(2): "Level(2)",
 	} {
 		levelString := level.String()

@@ -1,9 +1,10 @@
 package ligno_test
+
 import (
-	"testing"
 	"github.com/delicb/ligno"
 	"strings"
-//	"time"
+	"testing"
+	//	"time"
 )
 
 func TestDefaultLogSimpleFormatter(t *testing.T) {

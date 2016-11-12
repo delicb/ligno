@@ -1,18 +1,18 @@
 package ligno
 
 import (
-	"testing"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
+	"os"
 	"runtime"
 	"runtime/debug"
-	"time"
-	"bytes"
-	"log"
-	"os"
 	"sync"
-//	"flag"
+	"testing"
+	"time"
+	//	"flag"
 	"strings"
 )
 
@@ -205,7 +205,7 @@ func TestContext(t *testing.T) {
 		PreventPropagation: true,
 	})
 	l2 := l1.SubLoggerOptions("b", LoggerOptions{
-		Context: Ctx{"b": "b"},
+		Context:            Ctx{"b": "b"},
 		Handler:            StreamHandler(os.Stderr, TerminalFormat()),
 		PreventPropagation: true,
 	})

@@ -137,6 +137,7 @@ func Panicln(v ...interface{}) {
 	rootLogger.Log(2, CRITICAL, s)
 	panic(s)
 }
+
 // SetHandler sets new handler for default logger.
 func SetHandler(handler Handler) {
 	rootLogger.SetHandler(handler)

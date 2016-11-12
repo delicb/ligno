@@ -1,8 +1,9 @@
 package main
+
 import (
+	"fmt"
 	"github.com/delicb/ligno"
 	"os"
-	"fmt"
 )
 
 func main() {
