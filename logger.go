@@ -95,7 +95,7 @@ func (l *Logger) Panicln(v ...interface{}) {
 // root logger is parent of all loggers and it always exists.
 var rootLogger = createLogger("", LoggerOptions{
 	Context:    nil,
-	Handler:    StreamHandler(os.Stderr, SimpleFormat()),
+	Handler:    StreamHandler(os.Stdout, TerminalFormat()),
 	BufferSize: 2048,
 })
 

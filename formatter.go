@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
+
+	isatty "github.com/mattn/go-isatty"
 )
 
 // Formatter is interface for converting log record to string representation.
@@ -50,13 +53,11 @@ func SimpleFormat() Formatter {
 
 // TerminalFormat returns ThemeTerminalFormat with default theme set.
 func TerminalFormat() Formatter {
-	return ThemedTerminalFormat(DefaultTheme)
-}
-
-// NoColorTerminalFormat returns ThemeTerminalFormat with theme that does
-// not colorize anything.
-func NoColorTerminalFormat() Formatter {
-	return ThemedTerminalFormat(NoColorTheme)
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		return ThemedTerminalFormat(DefaultTheme)
+	} else {
+		return ThemedTerminalFormat(NoColorTheme)
+	}
 }
 
 // ThemedTerminalFormat returns formatter that produces records formatted for
@@ -64,19 +65,19 @@ func NoColorTerminalFormat() Formatter {
 // one includes context keys)
 func ThemedTerminalFormat(theme Theme) Formatter {
 	return FormatterFunc(func(record Record) []byte {
-		time := record.Time.Format(DefaultTimeFormat)
+		//time := record.Time.Format(DefaultTimeFormat)
 		buff := buffPool.Get()
 		defer buffPool.Put(buff)
-		buff.WriteString(theme.Time(time))
-		buff.WriteRune(' ')
+		//buff.WriteString(theme.Time(time))
+		//buff.WriteRune(' ')
+		levelColor := theme.ForLevel(record.Level)
 		levelName := record.Level.String()
-		buff.WriteString(theme.Level(levelName))
+		buff.WriteString(levelColor(levelName))
 		padSpaces := levelNameMaxLength - len(levelName) + 2
 		buff.Write(bytes.Repeat([]byte(" "), padSpaces))
 		buff.WriteRune(' ')
 
-		colFunc := theme.Colorizer(record.Level)
-		buff.WriteString(colFunc(record.Message))
+		buff.WriteString(record.Message)
 
 		ctx := record.Context
 		keys := make([]string, 0, len(ctx))
@@ -86,27 +87,28 @@ func ThemedTerminalFormat(theme Theme) Formatter {
 		sort.Strings(keys)
 
 		if len(keys) > 0 {
-			buff.WriteString(colFunc(" ["))
+			buff.WriteString(" [")
 		}
 		for i := 0; i < len(keys); i++ {
 			k := keys[i]
 			keyQuote := strings.IndexFunc(k, needsQuote) >= 0 || k == ""
 			if keyQuote {
-				buff.WriteString(colFunc("\""))
+				buff.WriteRune('"')
 			}
-			buff.WriteString(colFunc(k))
+			buff.WriteString(k)
 			if keyQuote {
 				buff.WriteRune('"')
 			}
-			buff.WriteString(colFunc("=\""))
-			buff.WriteString(colFunc(fmt.Sprintf("%+v", ctx[k])))
-			buff.WriteString(colFunc("\""))
+			buff.WriteRune('=')
+			buff.WriteRune('"')
+			buff.WriteString(fmt.Sprintf("%+v", ctx[k]))
+			buff.WriteRune('"')
 			if i < len(keys)-1 {
 				buff.WriteRune(' ')
 			}
 		}
 		if len(keys) > 0 {
-			buff.WriteString(colFunc("]"))
+			buff.WriteRune(']')
 		}
 		buff.WriteRune('\n')
 		return buff.Bytes()

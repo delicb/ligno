@@ -106,18 +106,16 @@ func (l *Level) UnmarshalJSON(b []byte) error {
 // Theme is definition of interface needed for colorizing log message to console.
 type Theme interface {
 	Time(msg string, args ...interface{}) string
-	Level(msg string, args ...interface{}) string
 	Debug(msg string, args ...interface{}) string
 	Info(msg string, args ...interface{}) string
 	Warning(msg string, args ...interface{}) string
 	Error(msg string, args ...interface{}) string
 	Critical(msg string, args ...interface{}) string
-	Colorizer(level Level) func(msg string, args ...interface{}) string
+	ForLevel(level Level) func(msg string, args ...interface{}) string
 }
 
 type theme struct {
 	timeColor     func(str string, args ...interface{}) string
-	levelColor    func(str string, args ...interface{}) string
 	debugColor    func(str string, args ...interface{}) string
 	infoColor     func(str string, args ...interface{}) string
 	warningColor  func(str string, args ...interface{}) string
@@ -127,10 +125,6 @@ type theme struct {
 
 func (t *theme) Time(msg string, args ...interface{}) string {
 	return t.timeColor(msg, args...)
-}
-
-func (t *theme) Level(msg string, args ...interface{}) string {
-	return t.levelColor(msg, args...)
 }
 
 func (t *theme) Debug(msg string, args ...interface{}) string {
@@ -153,7 +147,7 @@ func (t *theme) Critical(msg string, args ...interface{}) string {
 	return t.criticalColor(msg, args...)
 }
 
-func (t *theme) Colorizer(level Level) func(msg string, args ...interface{}) string {
+func (t *theme) ForLevel(level Level) func(msg string, args ...interface{}) string {
 	switch {
 	case level < INFO:
 		return t.debugColor
@@ -174,7 +168,6 @@ var (
 	// DefaultTheme defines theme used by default.
 	DefaultTheme = &theme{
 		timeColor:     color.New(color.FgWhite, color.Faint).SprintfFunc(),
-		levelColor:    color.New(color.FgWhite, color.Italic).SprintfFunc(),
 		debugColor:    color.New(color.FgWhite).SprintfFunc(),
 		infoColor:     color.New(color.FgHiWhite).SprintfFunc(),
 		warningColor:  color.New(color.FgYellow).SprintfFunc(),
@@ -185,7 +178,6 @@ var (
 	// NoColorTheme defines theme that does not color any output.
 	NoColorTheme = &theme{
 		timeColor:     fmt.Sprintf,
-		levelColor:    fmt.Sprintf,
 		debugColor:    fmt.Sprintf,
 		infoColor:     fmt.Sprintf,
 		warningColor:  fmt.Sprintf,
