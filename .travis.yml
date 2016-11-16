@@ -1,0 +1,12 @@
+language: go
+
+go:
+  - 1.7
+
+go_import_path: go.delic.rs/ligno
+
+script:
+  - go test -race -coverprofile=coverage.txt -covermode=atomic
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
