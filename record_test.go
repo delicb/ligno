@@ -13,14 +13,14 @@ func TestCreateRecordEmpty(t *testing.T) {
 func TestSerializeRecordToJSON(t *testing.T) {
 	recordTime := time.Now().UTC()
 	testData := []Record{
-		Record{
+		{
 			Time:    recordTime,
 			Level:   INFO,
 			Message: "some message",
 			Context: Ctx{"a": "b"},
 			Logger:  nil,
 		},
-		Record{
+		{
 			Time:    recordTime,
 			Level:   ERROR,
 			Context: Ctx{},

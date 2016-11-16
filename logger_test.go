@@ -61,16 +61,10 @@ func TestCreate(t *testing.T) {
 		handler Handler
 		level   Level
 	}{
-		struct {
-			ctx     Ctx
-			handler Handler
-			level   Level
-		}{nil, nil, INFO},
-		struct {
-			ctx     Ctx
-			handler Handler
-			level   Level
-		}{nil, nil, INFO},
+
+		{nil, nil, INFO},
+
+		{nil, nil, INFO},
 	}
 
 	for _, p := range params {
