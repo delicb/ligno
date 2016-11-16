@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/delicb/ligno"
 	"os"
+
+	"go.delic.rs/ligno"
 )
 
 func main() {

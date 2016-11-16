@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/delicb/ligno"
+	"go.delic.rs/ligno"
 )
 
 func main() {
