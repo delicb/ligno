@@ -1,7 +1,7 @@
 package ligno_test
 
 import (
-	"github.com/delicb/ligno"
+	"go.delic.rs/ligno"
 	"strings"
 	"testing"
 	//	"time"
