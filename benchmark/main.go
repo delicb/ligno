@@ -20,6 +20,7 @@ import (
 	"resenje.org/logging"
 )
 
+// Measurement struct that holds info about single measurement.
 type Measurement struct {
 	name      string
 	average   time.Duration
@@ -28,10 +29,12 @@ type Measurement struct {
 	afterFunc func()
 }
 
+// String is implementation of Stringer interface for Measurement. Returns some basic measurement info.
 func (m *Measurement) String() string {
 	return fmt.Sprintf("%-15s average time: %10s, total time: %15s", m.name, m.average, m.total)
 }
 
+// Run executes measurement and records results.
 func (m *Measurement) Run() {
 	times := make([]time.Duration, 0, count)
 	totalStart := time.Now()
@@ -48,6 +51,8 @@ func (m *Measurement) Run() {
 	m.total = totalEnd.Sub(totalStart)
 }
 
+// MeasurementList list of measurements. It implements sort.Interface for
+// measurement sorting based on different criteria.
 type MeasurementList []*Measurement
 
 func (ml MeasurementList) Len() int {
@@ -133,7 +138,7 @@ func main() {
 }
 
 func avg(times []time.Duration) float64 {
-	var sum int64 = 0
+	var sum int64
 	for i := 0; i < len(times); i++ {
 		sum += int64(times[i])
 	}

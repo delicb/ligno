@@ -50,7 +50,7 @@ func TestGetLoggerCustom(t *testing.T) {
 		parts := strings.Split(loggerName, ".")
 		last := parts[len(parts)-1]
 		if last != newLogger.Name() {
-			t.Errorf("Expected logger with name: %s, got %s\n", last, newLogger.Name)
+			t.Errorf("Expected logger with name: %s, got %s\n", last, newLogger.Name())
 		}
 	}
 }

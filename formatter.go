@@ -55,9 +55,8 @@ func SimpleFormat() Formatter {
 func TerminalFormat() Formatter {
 	if isatty.IsTerminal(os.Stdout.Fd()) {
 		return ThemedTerminalFormat(DefaultTheme)
-	} else {
-		return ThemedTerminalFormat(NoColorTheme)
 	}
+	return ThemedTerminalFormat(NoColorTheme)
 }
 
 // ThemedTerminalFormat returns formatter that produces records formatted for
