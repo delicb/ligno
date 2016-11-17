@@ -2,7 +2,8 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/delicb/ligno)](https://goreportcard.com/report/github.com/delicb/ligno)
 [![Build Status](https://travis-ci.org/delicb/ligno.svg?branch=master)](https://travis-ci.org/delicb/ligno)
 [![codecov](https://codecov.io/gh/delicb/ligno/branch/master/graph/badge.svg)](https://codecov.io/gh/delicb/ligno)
-[![GoDoc](http://godoc.org/github.com/delicb/ligno?status.png)](http://godoc.org/github.com/delicb/ligno)
+![status](https://img.shields.io/badge/status-beta-red.svg)
+[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/delicb/ligno)
 
 Ligno is async structured logging library for golang.
 
