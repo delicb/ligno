@@ -47,6 +47,13 @@ func (l *Logger) Println(v ...interface{}) {
 	l.Log(2, INFO, fmt.Sprintln(v...))
 }
 
+// Write is implementation of io.Writer interface for logger.
+// It writes provided message in INFO level to logger.
+func (l *Logger) Write(p []byte) (n int, err error) {
+	l.Log(2, INFO, string(p))
+	return len(p), nil
+}
+
 // Fatal formats message according to stdlib rules, logs it in CRITICAL level
 // and exists application.
 func (l *Logger) Fatal(v ...interface{}) {
