@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"go.delic.rs/ligno"
+	"github.com/delicb/ligno"
 
 	"flag"
 
