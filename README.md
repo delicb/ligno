@@ -18,7 +18,7 @@ formatted to any structured format (JSON, YAML, key=value) or to traditional
 formats that we are used to seeing in log files.
 
 ## Install
-Run `go get go.delic.rs/ligno` from command line.
+Run `go get github.com/delicb/ligno` from command line.
 
 ## Example
 Just a quick example of how usage might look like.
