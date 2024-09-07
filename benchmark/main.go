@@ -12,11 +12,11 @@ import (
 
 	"sync"
 
-	"github.com/Sirupsen/logrus"
 	"github.com/cihub/seelog"
 	"github.com/inconshreveable/log15"
 	gommon "github.com/labstack/gommon/log"
 	logxi "github.com/mgutz/logxi/v1"
+	"github.com/sirupsen/logrus"
 	"resenje.org/logging"
 )
 
